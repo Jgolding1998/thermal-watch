@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.venv/
+.env
+.env.*
+data/
+*.sqlite*
+readings*.csv
+*.csv.lock
+.thermal-*.tmp
+config.local.json
+node_modules/
+package-lock.json
+.pytest_cache/
+coverage.xml
+.coverage

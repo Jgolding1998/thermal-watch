@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Local temperature monitoring for the things you want to keep an eye on.">
+  <title>Thermal Watch | Home overview</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="/"><span class="brand-mark">t<span>°</span></span><span>thermal<span class="brand-light">watch</span></span></a>
+    <div class="workspace"><span class="house">⌂</span><div>Home workspace<small>Local monitoring</small></div><span class="workspace-dot"></span></div>
+    <p class="nav-label">WORKSPACE</p>
+    <nav aria-label="Main navigation"><a href="#overview" class="nav-active"><span>▦</span> Overview</a><a href="#sensors"><span>◉</span> Sensors</a><a href="#events"><span>☷</span> Activity log <span id="event-count" class="count">0</span></a><a href="#setup"><span>⚙</span> Setup guide</a></nav>
+    <div class="local-note"><span class="lock-icon">▣</span><strong>Your home. Your data.</strong><p>Readings stay on this computer. Outbound alerts require your own endpoint and an explicit startup option.</p></div>
+    <div class="sidebar-bottom"><span class="status-dot"></span> Local service <span class="version">v1.0</span></div>
+  </aside>
+  <div class="main-shell">
+    <header class="topbar"><div>Workspace <span>/</span> <strong>Home overview</strong></div><div class="topbar-right"><span id="connection" class="connection">Connecting</span><span class="avatar">⌂</span></div></header>
+    <main id="overview">
+      <div class="heading-row"><div><p class="eyebrow">A LITTLE PEACE OF MIND</p><h1>Temperatures, at a glance.</h1><p class="intro">A clear view of your temperatures, and a heads-up when they need you.</p></div><div class="heading-actions"><div class="unit-switch" aria-label="Temperature units"><button id="unit-c" class="selected" aria-pressed="true">°C</button><button id="unit-f" aria-pressed="false">°F</button></div><span class="live-time" id="updated">Waiting for readings</span></div></div>
+      <div class="mode-banner" id="mode-banner"><span class="demo-icon">◈</span><div><strong id="mode-title">Loading local service</strong><p id="mode-copy">Reading sensor status.</p></div><span class="mode-badge" id="mode-badge">LOCAL</span></div>
+      <div id="connection-error" class="error-banner" role="alert" hidden>Dashboard connection lost. Values below are the last snapshot and must not be treated as current.</div>
+      <div id="input-error" class="error-banner" role="alert" hidden></div>
+      <section class="summary-grid" aria-label="Monitoring summary"><article class="summary"><span class="summary-label">MONITORED SENSORS</span><div><strong id="sensor-total">0</strong><span class="summary-icon">◉</span></div><p>One place for every reading</p></article><article class="summary"><span class="summary-label">IN RANGE</span><div><strong id="normal-total">0</strong><span class="summary-icon green">✓</span></div><p id="normal-caption">Waiting for sensor data</p></article><article class="summary"><span class="summary-label">NEEDS ATTENTION</span><div><strong id="attention-total">0</strong><span class="summary-icon amber">!</span></div><p>Temperature or sensor health</p></article><article class="summary"><span class="summary-label">ALERT DELIVERY</span><div><strong class="delivery-value" id="delivery">Local log</strong><span class="summary-icon">↗</span></div><p id="delivery-caption">No external endpoint connected</p></article></section>
+      <section id="sensors" class="sensors-section"><div class="section-heading"><div><h2>Your sensors</h2><p>Temperature and connectivity, side by side.</p></div><span class="subtle">Refreshes every 2 seconds</span></div><div id="sensor-grid" class="sensor-grid"></div></section>
+      <div class="lower-grid"><section id="events" class="activity panel"><div class="panel-heading"><div><h2>Recent activity</h2><p>State changes, not a flood of repeat alerts.</p></div><span class="activity-mark">☷</span></div><div id="event-list" class="event-list"><div class="empty-state"><span>✓</span><strong>Quiet is a good thing.</strong><p>Sensor alerts and recoveries will appear here.</p></div></div><div class="panel-footer">Latest 60 events shown · up to 500 retained locally</div></section><section id="setup" class="setup panel"><div class="panel-heading"><div><span class="setup-label">MAKE IT YOURS</span><h2>From demo to your home</h2></div><span class="activity-mark">↗</span></div><ol class="setup-steps"><li><span>1</span><div><strong>Connect a sensor</strong><p>Write Celsius readings from your sensor into the documented local CSV format.</p></div></li><li><span>2</span><div><strong>Set a useful range</strong><p>Edit your JSON config. Dwell time and hysteresis keep short blips from becoming noise.</p></div></li><li><span>3</span><div><strong>Choose where alerts go</strong><p>Keep the local event log, or explicitly connect your own HTTPS webhook.</p></div></li></ol><div class="setup-footnote">See the repository README for commands, wiring notes and the alert payload contract.</div></section></div>
+      <footer><span>Thermal Watch <span class="footer-dot">·</span> Small signals. Clear decisions.</span><span>Monitoring aid only. Not a certified food safety or appliance control system.</span></footer>
+    </main>
+  </div>
+  <template id="sensor-template"><article class="sensor-card"><div class="sensor-top"><span class="sensor-type-icon">◉</span><div><h3 class="sensor-name"></h3><span class="sensor-id"></span></div><span class="sensor-status"></span></div><div class="temperature"><strong></strong><span class="temp-unit"></span></div><p class="sensor-message"></p><svg class="sparkline" viewBox="0 0 480 88" role="img" aria-label="Recent temperature trend" preserveAspectRatio="none"><path class="chart-area"></path><path class="chart-line"></path></svg><div class="range-row"><span>Target range <strong class="sensor-range"></strong></span><span class="sensor-age"></span></div></article></template>
+</body>
+</html>

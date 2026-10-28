@@ -1,0 +1,22 @@
+{
+  "sensors": [
+    {
+      "sensor": "freezer",
+      "label": "Garage freezer",
+      "minimum_c": -24,
+      "maximum_c": -14,
+      "hysteresis_c": 1,
+      "dwell_seconds": 8,
+      "stale_seconds": 20
+    },
+    {
+      "sensor": "cooker",
+      "label": "Countertop cooker",
+      "minimum_c": 60,
+      "maximum_c": 95,
+      "hysteresis_c": 2,
+      "dwell_seconds": 8,
+      "stale_seconds": 20
+    }
+  ]
+}
