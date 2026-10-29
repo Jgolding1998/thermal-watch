@@ -108,6 +108,7 @@ class Application:
                         value = rule.maximum_c + 3 + math.sin(phase / 5)
                     if 48 <= phase <= 66 and index == 1:
                         value = rule.minimum_c - 4 + math.sin(phase / 5)
+                    value = max(-100, min(350, value))
                     self.monitor.reading(sensor, value)
             self.monitor.tick()
 

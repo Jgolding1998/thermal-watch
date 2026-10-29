@@ -14,6 +14,8 @@ python -m thermal_watch
 
 Open **http://127.0.0.1:8766**. The demo simulates two sensors, a warm freezer, a cool cooker, and their recoveries over a 90-second cycle. It uses an in-memory database and cannot send outbound notifications. No account, API key, microphone, camera, or appliance is involved.
 
+Demo values stay within the same -100 to 350 °C input range as live readings. Custom thresholds near those limits can clip a simulated excursion.
+
 ## Try your own readings
 
 ```sh
