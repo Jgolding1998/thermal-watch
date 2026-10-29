@@ -12,5 +12,6 @@ config.local.json
 node_modules/
 package-lock.json
 .pytest_cache/
+work/
 coverage.xml
 .coverage
