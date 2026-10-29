@@ -359,11 +359,11 @@ class WebhookTests(unittest.TestCase):
                 try:
                     notifier = Notifier()
                     app = Application(monitor, Path("unused.csv"), notifier)
-                    self.assertEqual(app.watermark, 1)
+                    self.assertEqual(app.watermark, 2)
                     app.deliver()
                     app.deliver()
                     self.assertEqual([event["kind"] for event in notifier.events], ["stale"])
-                    self.assertEqual(app.watermark, 2)
+                    self.assertEqual(app.watermark, 3)
                     events = monitor.snapshot()["events"]
                     self.assertEqual(events[0]["delivery"], "sent" if successful else "failed")
                     self.assertEqual(events[1]["delivery"], "local")
@@ -459,6 +459,6 @@ class WebhookTests(unittest.TestCase):
         monitor.fault("freezer")
         app.deliver()
         app.deliver()
-        self.assertEqual(len(notifier.calls), 1)
+        self.assertEqual([event["kind"] for event in notifier.calls], ["online", "fault"])
         self.assertEqual(monitor.snapshot()["events"][0]["delivery"], "failed")
         monitor.close()

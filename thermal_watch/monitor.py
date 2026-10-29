@@ -24,8 +24,8 @@ class Rule:
     def __post_init__(self):
         if not isinstance(self.sensor, str) or not self.sensor or len(self.sensor) > 48 or not all(c.isalnum() or c in "_-" for c in self.sensor):
             raise ValueError("Sensor IDs must use 1 to 48 letters, numbers, underscores or hyphens")
-        if not isinstance(self.label, str) or not 1 <= len(self.label) <= 80:
-            raise ValueError("Sensor labels must use 1 to 80 characters")
+        if not isinstance(self.label, str) or not 1 <= len(self.label) <= 80 or not self.label.strip() or not self.label.isprintable():
+            raise ValueError("Sensor labels must use 1 to 80 printable characters")
         numbers = (self.minimum_c, self.maximum_c, self.hysteresis_c, self.dwell_seconds, self.stale_seconds, self.cooldown_seconds)
         if any(isinstance(n, bool) or not isinstance(n, (int, float)) for n in numbers):
             raise ValueError("Thresholds and timing must be finite numbers")
@@ -40,13 +40,35 @@ class Rule:
 def load_rules(path: Path | None) -> list[Rule]:
     if path is None:
         return [Rule("freezer", "Garage freezer", -24, -14, 1, 8, 20, 60), Rule("cooker", "Countertop cooker", 60, 95, 2, 8, 20, 60)]
-    if path.stat().st_size > 32768:
+    with path.open("rb") as stream:
+        raw = stream.read(32769)
+    if len(raw) > 32768:
         raise ValueError("Configuration is too large")
-    data = json.loads(path.read_text(encoding="utf-8"))
+
+    def unique(items):
+        result = {}
+        for key, value in items:
+            if key in result:
+                raise ValueError("Configuration contains duplicate keys")
+            result[key] = value
+        return result
+
+    def reject_constant(_):
+        raise ValueError("Configuration must use finite numbers")
+
+    try:
+        data = json.loads(raw.decode("utf-8"), object_pairs_hook=unique, parse_constant=reject_constant)
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError):
+        raise ValueError("Configuration must be valid UTF-8 JSON") from None
     if not isinstance(data, dict) or set(data) != {"sensors"} or not isinstance(data["sensors"], list):
         raise ValueError("Configuration must contain a sensors array")
     if not 1 <= len(data["sensors"]) <= 16:
         raise ValueError("Configure 1 to 16 sensors")
+    required = {"sensor", "label", "minimum_c", "maximum_c"}
+    allowed = set(Rule.__dataclass_fields__)
+    if any(not isinstance(entry, dict) or not required <= entry.keys() or not entry.keys() <= allowed
+           for entry in data["sensors"]):
+        raise ValueError("Each sensor must contain the required rule fields and no unknown fields")
     rules = [Rule(**entry) for entry in data["sensors"]]
     if len({rule.sensor for rule in rules}) != len(rules):
         raise ValueError("Sensor IDs must be unique")
@@ -117,11 +139,15 @@ class Monitor:
                 state["pending_since"] = None
             state["value_c"] = value
             state["observed_at"] = observed_at
-            state["fault"] = None
             fresh = now - observed_at <= rule.stale_seconds
-            if state["stale"] and fresh:
+            if fresh and (state["stale"] or state["fault"]):
+                was_fault = bool(state["fault"])
                 state["stale"] = False
-                self._event(sensor, "online", f"{rule.label}: fresh readings resumed")
+                state["fault"] = None
+                message = "valid sensor input resumed" if was_fault else "fresh readings resumed"
+                if state["alarm"]:
+                    message += "; temperature alarm remains active"
+                self._event(sensor, "online", f"{rule.label}: {message}")
             self.db.execute("INSERT INTO readings(sensor,value,observed) VALUES(?,?,?)", (sensor, value, observed_at))
             self.db.execute("DELETE FROM readings WHERE sensor=? AND id NOT IN (SELECT id FROM readings WHERE sensor=? ORDER BY id DESC LIMIT 240)", (sensor, sensor))
             if fresh:

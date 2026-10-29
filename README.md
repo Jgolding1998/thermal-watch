@@ -49,6 +49,10 @@ A high alarm at a maximum of -14 °C with 1 °C hysteresis clears at -15 °C. A 
 
 A jump directly to the opposite out-of-range condition does not send an all-clear. The existing alarm stays latched while the opposite condition completes its dwell, then switches to the new alarm. Recovery requires a reading inside the normal range that also meets the active alarm's hysteresis threshold.
 
+A fresh accepted reading after an input fault records one `online` event, even if the fault was too brief for a stale alert. Duplicate, out-of-order, and still-stale readings do not resolve an input fault. Simultaneous fault and stale recovery produces one event. `online` reports that readings resumed; it does not clear a temperature alarm. A separate `recovered` event confirms temperature recovery.
+
+Configuration files are limited to 32 KiB and strict UTF-8 JSON. Duplicate keys, unknown rule fields, nonfinite numbers, and nonprintable sensor labels are rejected rather than silently replacing alarm settings.
+
 Every new alarm episode after a recovery sends a new event, even if the same condition recurs immediately. Sustained alarms do not repeat notifications. The legacy `cooldown_seconds` field is accepted for configuration compatibility, but has no effect in this release: a cooldown must never suppress a real transition back into an alarm.
 
 The built-in writer atomically replaces a bounded current snapshot rather than appending forever. It holds an operating-system file lock while preserving the most recent row for every sensor, so multiple built-in producers can safely share one snapshot. A dead producer leaves its old reading in place; it becomes visibly stale.
