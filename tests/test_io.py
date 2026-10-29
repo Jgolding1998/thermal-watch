@@ -1,8 +1,12 @@
 import csv
 import io
 import json
+import http.client
 import multiprocessing
+import socket
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -188,7 +192,48 @@ def public_resolver(*_, **__):
     return [(2, 1, 6, "", ("93.184.216.34", 443))]
 
 
+class SlowDripServer:
+    def __init__(self, first, drip):
+        self.first, self.drip = first, drip
+        self.stopped = threading.Event()
+        self.listener = socket.create_server(("127.0.0.1", 0))
+        self.port = self.listener.getsockname()[1]
+        threading.Thread(target=self.run, daemon=True).start()
+
+    def run(self):
+        connection, _ = self.listener.accept()
+        with connection:
+            connection.settimeout(0.2)
+            try:
+                connection.recv(65536)
+            except OSError:
+                pass
+            try:
+                connection.sendall(self.first)
+                while not self.stopped.wait(0.1):
+                    connection.sendall(self.drip)
+            except OSError:
+                pass
+
+    def close(self):
+        self.stopped.set()
+        self.listener.close()
+
+
 class WebhookTests(unittest.TestCase):
+    def assert_abandoned_quickly(self, hook):
+        started = time.monotonic()
+        self.assertFalse(hook.send({"id": 1}))
+        self.assertLess(time.monotonic() - started, 3)
+
+    def test_slow_drip_response_cannot_hold_delivery_open(self):
+        server = SlowDripServer(b"HTTP/1.1 200 OK\r\n", b"X-Drip: a\r\n")
+        self.addCleanup(server.close)
+        class Plain(http.client.HTTPConnection):
+            def __init__(self, *_):
+                super().__init__("127.0.0.1", server.port, timeout=4)
+        self.assert_abandoned_quickly(Webhook("https://example.test", resolver=public_resolver, connection=Plain, deadline=0.3))
+
     def test_opposite_alarm_deliveries_never_include_a_false_all_clear(self):
         for first, opposite, expected in [(-10, -30, ["high", "low"]), (-30, -10, ["low", "high"])]:
             with self.subTest(expected=expected):

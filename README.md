@@ -74,7 +74,7 @@ python -m thermal_watch serve --csv readings.csv --config config.local.json --we
 
 No destination or credential is shipped. The endpoint must use HTTPS on port 443 and resolve exclusively to public IP addresses. One address is pinned for the process lifetime, with IPv4 preferred on dual-stack hosts. Certificate verification still uses the hostname, redirects are rejected, and environment proxy settings are not used. There is no cross-address failover or retry; use an endpoint reachable over its preferred address. Local or private network webhook endpoints are intentionally unsupported.
 
-Only new events created after this process starts are eligible for delivery, including a stale event detected during startup after the producer stopped while the dashboard was off. Historical events are not replayed. Each receives one attempt with a four-second socket timeout per network operation. The local log records `sent` or `failed`; there is no retry queue, delivery guarantee, or confirmation that a person read the message. A successful HTTP response means the endpoint accepted the request. Sensor ingestion runs on a separate thread from delivery.
+Only new events created after this process starts are eligible for delivery, including a stale event detected during startup after the producer stopped while the dashboard was off. Historical events are not replayed. Each receives one attempt with a four-second socket timeout per network operation and a 10-second limit for the whole attempt, so an endpoint that drips its response cannot hold later alerts back. On Windows, a read already blocked when the limit passes can take one more socket timeout to stop. The local log records `sent` or `failed`; there is no retry queue, delivery guarantee, or confirmation that a person read the message. A successful HTTP response means the endpoint accepted the request. Sensor ingestion runs on a separate thread from delivery.
 
 ```json
 {
@@ -115,7 +115,7 @@ The split keeps device input and network transport out of the state machine. Tes
 python -m unittest discover -s tests -v
 ```
 
-The 57 automated tests cover threshold boundaries, high and low excursions, dwell interruptions, recovery hysteresis, opposite alarm transitions, recurring alarm episodes, stale sensors, malformed and nonfinite input, timestamp rollback, startup stale delivery, bounded history, CSV replay and compaction, concurrent producer processes, DS18B20 CRC and range checks, webhook validation and failures, dual-stack address preference, hostile origins, traversal attempts, and the absence of a mutating API. Repeated unchanged sensor faults do not rewrite the database.
+The 61 automated tests cover threshold boundaries, high and low excursions, dwell interruptions, recovery hysteresis, opposite alarm transitions, recurring alarm episodes, stale sensors, malformed and nonfinite input, timestamp rollback, startup stale delivery, bounded history, CSV replay and compaction, concurrent producer processes, DS18B20 CRC and range checks, webhook validation, failures, and slow responses, dual-stack address preference, hostile origins, traversal attempts, malformed and slow HTTP requests, connection limits, and the absence of a mutating API. Repeated unchanged sensor faults do not rewrite the database.
 
 An optional browser smoke test needs Node.js and Playwright in your development environment:
 
@@ -128,13 +128,13 @@ node tests/browser_smoke.cjs
 
 It checks desktop and 390-pixel mobile layouts, unit conversion, the demo label, hostile labels, replacement snapshots and empty history, and the connection-loss warning. Screenshots are saved in `docs/`, or the directory set by `THERMAL_SCREENSHOT_DIR`. Set `THERMAL_BROWSER_CHANNEL=chrome` to use an installed Chrome instead of downloaded Chromium.
 
-Actual verification on October 28, 2026: 57 Python tests passed on Python 3.12; the browser smoke test passed in headless Edge at 1440 and 390 pixels. Screenshots were visually inspected. Independent review reproduced a suppressed recurring alarm and an unbounded producer file; regression tests now verify both fixes. CI is configured separately for Python 3.11 through 3.13 on Linux and Windows. Physical probes, an actual freezer or cooker, and a real external notification endpoint were not tested.
+Actual verification on October 28, 2026: 57 Python tests passed on Python 3.12; the browser smoke test passed in headless Edge at 1440 and 390 pixels. Screenshots were visually inspected. Independent review reproduced a suppressed recurring alarm and an unbounded producer file; regression tests now verify both fixes. CI is configured separately for Python 3.11 through 3.13 on Linux and Windows. On October 29, 2026, 61 Python tests passed on Python 3.12 after adding the webhook attempt limit and HTTP request limits. Physical probes, an actual freezer or cooker, and a real external notification endpoint were not tested.
 
 ## Boundaries
 
 This is a monitoring aid, not a certified food safety system, thermostat, appliance controller, or emergency alert service. It does not switch appliances. A stopped computer, failed probe, failed network, or failed delivery can prevent an alert. Use an independent alarm where missed alerts would cause harm.
 
-The server listens only on IPv4 loopback. It rejects unexpected `Host` and `Origin` headers and cross-site fetches, exposes no upload or settings-write endpoint, and serves only three fixed UI assets. It is intended for one trusted local operating-system account. Read [SECURITY.md](SECURITY.md) before changing the network exposure.
+The server listens only on IPv4 loopback. It rejects unexpected `Host` and `Origin` headers and cross-site fetches, exposes no upload or settings-write endpoint, and serves only three fixed UI assets. It serves at most 16 connections at a time and answers extra ones with `503`. A client must finish sending request headers within five seconds; on Windows a stalled read can take up to one more three-second socket timeout to close. It is intended for one trusted local operating-system account. Read [SECURITY.md](SECURITY.md) before changing the network exposure.
 
 ## Related work
 

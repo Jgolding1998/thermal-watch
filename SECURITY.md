@@ -5,6 +5,7 @@ Thermal Watch is a local application for a trusted operating-system account. Its
 ## Controls
 
 - IPv4 loopback bind, exact allowed hosts and same-origin checks, and rejection of cross-site browser fetches.
+- At most 16 concurrent connections, a five-second limit for request headers, and plain error replies with the same security headers. Versionless and unsupported HTTP versions are rejected, and responses do not name the Python version.
 - A read-only dashboard: no upload, command execution, file browsing, settings mutation, or device control endpoint.
 - Three explicit static routes. URL text is never joined to a filesystem path.
 - Local JavaScript uses `textContent` for labels and events. Charts receive validated finite numbers.
@@ -17,7 +18,7 @@ Thermal Watch is a local application for a trusted operating-system account. Its
 
 ## Remaining risks
 
-A user or program that can write your local config, CSV, database, or Python installation can falsify readings or affect the process. Loopback is not a boundary against other processes running as your account. The service has no multi-user authentication or rate limiting and is not designed for a public network. Do not change the bind address or put it behind a public tunnel.
+A user or program that can write your local config, CSV, database, or Python installation can falsify readings or affect the process. Loopback is not a boundary against other processes running as your account. The service has no multi-user authentication or per-client rate limiting and is not designed for a public network. Do not change the bind address or put it behind a public tunnel.
 
 An outbound endpoint can receive sensor labels and event times only when you deliberately enable it. Treat webhook URLs as secrets and use your own secret storage. The process pins DNS for its lifetime, so restart it if your legitimate endpoint's address changes. Delivery is one attempt, with failure retained locally; a failed endpoint does not stop sensor ingestion.
 

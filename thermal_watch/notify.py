@@ -5,6 +5,7 @@ import ipaddress
 import json
 import socket
 import ssl
+import threading
 from urllib.parse import urlsplit
 
 
@@ -40,8 +41,20 @@ class PinnedHTTPS(http.client.HTTPSConnection):
             raise
 
 
+def _enforce_deadline(connection, finished, seconds):
+    if finished.wait(seconds):
+        return
+    while not finished.wait(0.05):
+        sock = getattr(connection, "sock", None)
+        if sock is not None:
+            try:
+                socket.socket.shutdown(sock, socket.SHUT_RDWR)
+            except OSError:
+                pass
+
+
 class Webhook:
-    def __init__(self, url, resolver=socket.getaddrinfo, connection=PinnedHTTPS):
+    def __init__(self, url, resolver=socket.getaddrinfo, connection=PinnedHTTPS, deadline=10):
         parsed = urlsplit(url)
         if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.port not in {None, 443} or parsed.fragment:
             raise ValueError("Webhook requires a public HTTPS endpoint on port 443 without credentials or a fragment")
@@ -54,12 +67,15 @@ class Webhook:
         if parsed.query:
             self.path += "?" + parsed.query
         self.connection = connection
+        self.deadline = deadline
 
     def send(self, event):
         payload = json.dumps({"source": "thermal-watch", "event": event}, allow_nan=False).encode("utf-8")
         if len(payload) > 8192:
             return False
         connection = self.connection(self.host, self.address)
+        finished = threading.Event()
+        threading.Thread(target=_enforce_deadline, args=(connection, finished, self.deadline), daemon=True).start()
         try:
             connection.request("POST", self.path, payload, {"Content-Type": "application/json", "User-Agent": "thermal-watch/1.0", "Connection": "close"})
             response = connection.getresponse()
@@ -68,4 +84,5 @@ class Webhook:
         except (OSError, http.client.HTTPException):
             return False
         finally:
+            finished.set()
             connection.close()

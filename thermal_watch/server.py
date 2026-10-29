@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import socket
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -13,6 +14,46 @@ from .inputs import SnapshotError, read_csv
 
 STATIC = Path(__file__).parent / "static"
 ASSETS = {"/": ("index.html", "text/html; charset=utf-8"), "/app.js": ("app.js", "text/javascript; charset=utf-8"), "/styles.css": ("styles.css", "text/css; charset=utf-8")}
+SECURITY_HEADERS = {
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+}
+ERRORS = {400: b"Invalid request", 404: b"Not found", 408: b"Request timed out", 414: b"Request too large", 431: b"Request headers too large", 501: b"Method not supported", 505: b"HTTP version not supported"}
+HEADER_SECONDS = 5.0
+MAX_CONNECTIONS = 16
+BUSY_RESPONSE = (b"HTTP/1.0 503 Service Unavailable\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 11\r\n"
+                 + b"".join(f"{name}: {value}\r\n".encode() for name, value in SECURITY_HEADERS.items())
+                 + b"Connection: close\r\n\r\nServer busy")
+
+
+class SocketDeadline:
+    """Shuts a connection down at a fixed time unless cancelled. It never fires after cancel() returns."""
+
+    def __init__(self, connection, seconds):
+        self.connection, self.lock = connection, threading.Lock()
+        self.cancelled = self.expired = False
+        self.timer = threading.Timer(seconds, self._expire)
+        self.timer.daemon = True
+        self.timer.start()
+
+    def _expire(self):
+        with self.lock:
+            if self.cancelled:
+                return
+            self.expired = True
+            try:
+                self.connection.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+
+    def cancel(self):
+        with self.lock:
+            self.cancelled = True
+        self.timer.cancel()
+        return self.expired
 
 
 class Application:
@@ -90,17 +131,44 @@ def make_server(app, port=8766):
         def log_message(self, *_):
             pass
 
+        def version_string(self):
+            return "Thermal Watch"
+
+        def handle_one_request(self):
+            self._header_deadline = SocketDeadline(self.connection, HEADER_SECONDS)
+            try:
+                super().handle_one_request()
+            finally:
+                self._header_deadline.cancel()
+
+        def parse_request(self):
+            try:
+                accepted = super().parse_request()
+            finally:
+                expired = self._header_deadline.cancel()
+            if expired:
+                self.close_connection = True
+                return False
+            if accepted and self.request_version not in {"HTTP/1.0", "HTTP/1.1"}:
+                self.send_error(400 if self.request_version == "HTTP/0.9" else 505)
+                return False
+            return accepted
+
+        def send_error(self, code, message=None, explain=None):
+            self.close_connection = True
+            if getattr(self, "request_version", "HTTP/0.9") == "HTTP/0.9":
+                self.request_version = "HTTP/1.0"
+            self.reply(code, ERRORS.get(code, b"Request failed"))
+
         def reply(self, code, body=b"", content_type="text/plain; charset=utf-8"):
             self.send_response(code)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("X-Content-Type-Options", "nosniff")
-            self.send_header("Referrer-Policy", "no-referrer")
-            self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
-            self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+            for name, value in SECURITY_HEADERS.items():
+                self.send_header(name, value)
             self.end_headers()
-            self.wfile.write(body)
+            if getattr(self, "command", None) != "HEAD":
+                self.wfile.write(body)
 
         def allowed(self):
             actual_port = self.server.server_address[1]
@@ -147,9 +215,36 @@ def make_server(app, port=8766):
     class LocalServer(ThreadingHTTPServer):
         daemon_threads = True
 
+        def __init__(self, *args):
+            self.connections = threading.BoundedSemaphore(MAX_CONNECTIONS)
+            super().__init__(*args)
+
         def get_request(self):
             connection, address = super().get_request()
             connection.settimeout(3)
             return connection, address
+
+        def process_request(self, request, address):
+            if not self.connections.acquire(blocking=False):
+                try:
+                    request.sendall(BUSY_RESPONSE)
+                except OSError:
+                    pass
+                self.shutdown_request(request)
+                return
+            try:
+                super().process_request(request, address)
+            except BaseException:
+                self.connections.release()
+                raise
+
+        def process_request_thread(self, request, address):
+            try:
+                super().process_request_thread(request, address)
+            finally:
+                self.connections.release()
+
+        def handle_error(self, request, address):
+            pass
 
     return LocalServer(("127.0.0.1", port), Handler)
