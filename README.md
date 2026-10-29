@@ -136,7 +136,7 @@ node tests/browser_smoke.cjs
 
 It checks desktop and 390-pixel mobile layouts, unit conversion, the demo label, hostile labels, replacement snapshots and empty history, and the connection-loss warning. Screenshots are saved in `docs/`, or the directory set by `THERMAL_SCREENSHOT_DIR`. Set `THERMAL_BROWSER_CHANNEL=chrome` to use an installed Chrome instead of downloaded Chromium.
 
-CI runs the Python tests on Python 3.11 through 3.13 on Linux and Windows. Browser smoke checks cover desktop and phone layouts. Physical probes, an actual freezer or cooker, and a real external notification endpoint still need manual verification.
+CI runs the Python tests on Python 3.11 through 3.13 on Linux and Windows. The optional browser smoke check covers desktop and phone layouts and is run manually, outside CI. Physical probes, an actual freezer or cooker, and a real external notification endpoint still need manual verification.
 
 ## Boundaries
 

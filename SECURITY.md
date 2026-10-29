@@ -28,4 +28,8 @@ Clock rollback is shown as an input fault until a current reading arrives. A phy
 
 Database files, real readings, local config, screenshots of private installations, and environment files must stay out of Git. The included screenshots use simulated data only. Before publishing a fork, inspect both current files and Git history with a secret scanner and check commit-author privacy settings.
 
-Use the repository's private security advisory feature to report a vulnerability when available. Do not include live credentials or private readings in an issue.
+## Reporting a vulnerability
+
+Use [Security > Report a vulnerability](https://github.com/Jgolding1998/thermal-watch/security/advisories/new) to send a private report. Do not submit vulnerability details through the public feedback form.
+
+Include the affected version, platform, expected behavior and a synthetic reproduction. Leave out credentials, personal information and private files.
