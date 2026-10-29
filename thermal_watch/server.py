@@ -228,6 +228,15 @@ def make_server(app, port=8766):
             if not self.connections.acquire(blocking=False):
                 try:
                     request.sendall(BUSY_RESPONSE)
+                    request.shutdown(socket.SHUT_WR)
+                    request.settimeout(0.05)
+                    remaining = 16384
+                    deadline = time.monotonic() + 0.1
+                    while remaining > 0 and time.monotonic() < deadline:
+                        data = request.recv(min(4096, remaining))
+                        if not data:
+                            break
+                        remaining -= len(data)
                 except OSError:
                     pass
                 self.shutdown_request(request)

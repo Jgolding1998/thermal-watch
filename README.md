@@ -115,7 +115,7 @@ The split keeps device input and network transport out of the state machine. Tes
 python -m unittest discover -s tests -v
 ```
 
-The 61 automated tests cover threshold boundaries, high and low excursions, dwell interruptions, recovery hysteresis, opposite alarm transitions, recurring alarm episodes, stale sensors, malformed and nonfinite input, timestamp rollback, startup stale delivery, bounded history, CSV replay and compaction, concurrent producer processes, DS18B20 CRC and range checks, webhook validation, failures, and slow responses, dual-stack address preference, hostile origins, traversal attempts, malformed and slow HTTP requests, connection limits, and the absence of a mutating API. Repeated unchanged sensor faults do not rewrite the database.
+The automated tests cover threshold boundaries, high and low excursions, dwell interruptions, recovery hysteresis, opposite alarm transitions, recurring alarm episodes, stale sensors, malformed and nonfinite input, timestamp rollback, startup stale delivery, bounded history, CSV replay and compaction, concurrent producer processes, DS18B20 CRC and range checks, webhook validation, failures and slow responses, dual-stack address preference, hostile origins, traversal attempts, malformed and slow HTTP requests, connection limits, and the absence of a mutating API. Repeated unchanged sensor faults do not rewrite the database.
 
 An optional browser smoke test needs Node.js and Playwright in your development environment:
 
@@ -128,7 +128,7 @@ node tests/browser_smoke.cjs
 
 It checks desktop and 390-pixel mobile layouts, unit conversion, the demo label, hostile labels, replacement snapshots and empty history, and the connection-loss warning. Screenshots are saved in `docs/`, or the directory set by `THERMAL_SCREENSHOT_DIR`. Set `THERMAL_BROWSER_CHANNEL=chrome` to use an installed Chrome instead of downloaded Chromium.
 
-Actual verification on October 28, 2026: 57 Python tests passed on Python 3.12; the browser smoke test passed in headless Edge at 1440 and 390 pixels. Screenshots were visually inspected. Independent review reproduced a suppressed recurring alarm and an unbounded producer file; regression tests now verify both fixes. CI is configured separately for Python 3.11 through 3.13 on Linux and Windows. On October 29, 2026, 61 Python tests passed on Python 3.12 after adding the webhook attempt limit and HTTP request limits. Physical probes, an actual freezer or cooker, and a real external notification endpoint were not tested.
+CI runs the Python tests on Python 3.11 through 3.13 on Linux and Windows. Browser smoke checks cover desktop and phone layouts. Physical probes, an actual freezer or cooker, and a real external notification endpoint still need manual verification.
 
 ## Boundaries
 

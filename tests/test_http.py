@@ -4,10 +4,10 @@ import socket
 import threading
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from thermal_watch.monitor import Monitor, Rule
-from thermal_watch.server import Application, make_server
+from thermal_watch.server import Application, BUSY_RESPONSE, make_server
 
 
 class HTTPTests(unittest.TestCase):
@@ -114,15 +114,23 @@ class HTTPTests(unittest.TestCase):
         self.addCleanup(thread.join)
         self.addCleanup(server.server_close)
         self.addCleanup(server.shutdown)
-        idle = [socket.create_connection(server.server_address, timeout=3) for _ in range(2)]
-        time.sleep(0.2)
-        with socket.create_connection(server.server_address, timeout=3) as extra:
-            response = http.client.HTTPResponse(extra)
-            response.begin()
-            self.assertEqual((response.status, response.read()), (503, b"Server busy"))
-            self.assertEqual(response.getheader("Cache-Control"), "no-store")
-        for connection in idle:
-            connection.close()
+        for _ in range(2):
+            self.assertTrue(server.connections.acquire(blocking=False))
+        try:
+            for method, body in [("GET", None), ("POST", b"x" * 8192)]:
+                for attempt in range(8):
+                    with self.subTest(method=method, attempt=attempt):
+                        client = http.client.HTTPConnection(*server.server_address, timeout=3)
+                        try:
+                            client.request(method, "/health", body=body)
+                            response = client.getresponse()
+                            self.assertEqual((response.status, response.read()), (503, b"Server busy"))
+                            self.assertEqual(response.getheader("Cache-Control"), "no-store")
+                        finally:
+                            client.close()
+        finally:
+            for _ in range(2):
+                server.connections.release()
         deadline, status = time.monotonic() + 5, None
         while status != 200 and time.monotonic() < deadline:
             client = http.client.HTTPConnection("127.0.0.1", server.server_address[1], timeout=3)
@@ -130,3 +138,37 @@ class HTTPTests(unittest.TestCase):
             status = client.getresponse().status
             client.close()
         self.assertEqual(status, 200)
+
+    def test_busy_response_drain_has_a_byte_limit_and_half_closes_first(self):
+        with patch("thermal_watch.server.MAX_CONNECTIONS", 1):
+            server = make_server(self.app, 0)
+        self.addCleanup(server.server_close)
+        self.assertTrue(server.connections.acquire(blocking=False))
+        request = Mock()
+        request.recv.return_value = b"x" * 4096
+        with patch("thermal_watch.server.time.monotonic", return_value=0):
+            server.process_request(request, ("127.0.0.1", 1))
+        request.sendall.assert_called_once_with(BUSY_RESPONSE)
+        self.assertEqual([call[0] for call in request.method_calls[:3]], ["sendall", "shutdown", "settimeout"])
+        self.assertEqual(request.method_calls[1].args, (socket.SHUT_WR,))
+        request.settimeout.assert_called_once_with(0.05)
+        self.assertEqual(request.recv.call_count, 4)
+        self.assertTrue(all(call.args[0] <= 4096 for call in request.recv.call_args_list))
+        request.close.assert_called_once()
+
+    def test_busy_response_drain_stops_at_the_deadline_or_socket_timeout(self):
+        with patch("thermal_watch.server.MAX_CONNECTIONS", 1):
+            server = make_server(self.app, 0)
+        self.addCleanup(server.server_close)
+        self.assertTrue(server.connections.acquire(blocking=False))
+        for timeout in (False, True):
+            with self.subTest(socket_timeout=timeout):
+                request = Mock()
+                if timeout:
+                    request.recv.side_effect = socket.timeout()
+                else:
+                    request.recv.return_value = b"x"
+                with patch("thermal_watch.server.time.monotonic", side_effect=[10.0, 10.01, 10.11]):
+                    server.process_request(request, ("127.0.0.1", 1))
+                self.assertEqual(request.recv.call_count, 1)
+                request.close.assert_called_once()
