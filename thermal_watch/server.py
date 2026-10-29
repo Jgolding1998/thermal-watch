@@ -9,7 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from .inputs import SnapshotError, read_csv
+from .inputs import SnapshotError, apply_csv, parse_csv
 
 
 STATIC = Path(__file__).parent / "static"
@@ -56,6 +56,10 @@ class SocketDeadline:
         return self.expired
 
 
+class ApplicationClosed(RuntimeError):
+    pass
+
+
 class Application:
     def __init__(self, monitor, csv_path=None, notifier=None):
         self.monitor = monitor
@@ -68,41 +72,66 @@ class Application:
         self.watermark = monitor.event_watermark()
         monitor.tick()
         self.threads = []
+        self._lifecycle_lock = threading.Lock()
+        self._closed = False
 
     def poll(self):
+        with self._lifecycle_lock:
+            if self._closed:
+                return
+        parsed, invalid = None, False
         if self.csv_path:
             try:
-                read_csv(self.csv_path, self.monitor)
-                self.input_error = None
-            except SnapshotError:
-                self.input_error = "One or more sensors have invalid input. Check the producer."
+                parsed, _ = parse_csv(self.csv_path, self.monitor.rules)
             except (OSError, ValueError, UnicodeError):
-                self.input_error = "Input is missing or invalid. Check your CSV producer."
-                for sensor in self.monitor.rules:
-                    self.monitor.fault(sensor)
-        else:
-            phase = (time.monotonic() - self.started) % 90
-            for index, (sensor, rule) in enumerate(self.monitor.rules.items()):
-                center = (rule.minimum_c + rule.maximum_c) / 2
-                value = center + math.sin(phase / 8 + index) * 0.6
-                if 16 <= phase <= 34 and index == 0:
-                    value = rule.maximum_c + 3 + math.sin(phase / 5)
-                if 48 <= phase <= 66 and index == 1:
-                    value = rule.minimum_c - 4 + math.sin(phase / 5)
-                self.monitor.reading(sensor, value)
-        self.monitor.tick()
+                invalid = True
+        with self._lifecycle_lock:
+            if self._closed:
+                return
+            if self.csv_path:
+                if invalid:
+                    self.input_error = "Input is missing or invalid. Check your CSV producer."
+                    for sensor in self.monitor.rules:
+                        self.monitor.fault(sensor)
+                else:
+                    try:
+                        apply_csv(parsed, self.monitor)
+                        self.input_error = None
+                    except SnapshotError:
+                        self.input_error = "One or more sensors have invalid input. Check the producer."
+            else:
+                phase = (time.monotonic() - self.started) % 90
+                for index, (sensor, rule) in enumerate(self.monitor.rules.items()):
+                    center = (rule.minimum_c + rule.maximum_c) / 2
+                    value = center + math.sin(phase / 8 + index) * 0.6
+                    if 16 <= phase <= 34 and index == 0:
+                        value = rule.maximum_c + 3 + math.sin(phase / 5)
+                    if 48 <= phase <= 66 and index == 1:
+                        value = rule.minimum_c - 4 + math.sin(phase / 5)
+                    self.monitor.reading(sensor, value)
+            self.monitor.tick()
 
     def deliver(self):
         if not self.notifier:
             return
-        for event in self.monitor.undelivered():
+        with self._lifecycle_lock:
+            if self._closed or self.stopped.is_set():
+                return
+            events = self.monitor.undelivered()
+        for event in events:
             if self.stopped.is_set():
                 break
             if event["id"] <= self.watermark:
                 continue
-            successful = self.notifier.send(event)
-            self.monitor.delivered(event["id"], "sent" if successful else "failed")
-            self.watermark = event["id"]
+            try:
+                successful = self.notifier.send(event)
+            except Exception:
+                successful = False
+            with self._lifecycle_lock:
+                if self._closed:
+                    return
+                self.monitor.delivered(event["id"], "sent" if successful else "failed")
+                self.watermark = event["id"]
 
     def _loop(self, action, delay):
         while not self.stopped.is_set():
@@ -115,13 +144,22 @@ class Application:
             thread.start()
             self.threads.append(thread)
 
-    def close(self):
+    def close(self, timeout=10):
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not 0 <= timeout <= threading.TIMEOUT_MAX or not math.isfinite(timeout):
+            raise ValueError("Shutdown timeout must fit the supported nonnegative thread-wait range")
         self.stopped.set()
+        deadline = time.monotonic() + timeout
         for thread in self.threads:
-            thread.join(timeout=10)
+            if thread is not threading.current_thread():
+                thread.join(timeout=min(threading.TIMEOUT_MAX, max(0, deadline - time.monotonic())))
+        with self._lifecycle_lock:
+            self._closed = True
 
     def snapshot(self):
-        return {**self.monitor.snapshot(), "mode": self.mode, "input_error": self.input_error, "webhook_enabled": bool(self.notifier), "uptime_seconds": round(time.monotonic()-self.started), "demo_cycle_seconds": 90}
+        with self._lifecycle_lock:
+            if self._closed:
+                raise ApplicationClosed("Dashboard has stopped")
+            return {**self.monitor.snapshot(), "mode": self.mode, "input_error": self.input_error, "webhook_enabled": bool(self.notifier), "uptime_seconds": round(time.monotonic()-self.started), "demo_cycle_seconds": 90}
 
 
 def make_server(app, port=8766):
@@ -194,7 +232,12 @@ def make_server(app, port=8766):
                 self.reply(414)
                 return
             if self.path == "/api/state":
-                self.reply(200, json.dumps(app.snapshot(), allow_nan=False).encode(), "application/json; charset=utf-8")
+                try:
+                    state = app.snapshot()
+                except ApplicationClosed:
+                    self.reply(503, b"Dashboard has stopped")
+                    return
+                self.reply(200, json.dumps(state, allow_nan=False).encode(), "application/json; charset=utf-8")
             elif self.path == "/health":
                 self.reply(200, b'{"status":"ok"}', "application/json")
             elif self.path in ASSETS:

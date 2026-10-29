@@ -74,24 +74,31 @@ class Webhook:
         payload = json.dumps({"source": "thermal-watch", "event": event}, allow_nan=False).encode("utf-8")
         if len(payload) > 8192:
             return False
-        connection = self.connection(self.host, self.address)
-        expires = time.monotonic() + self.deadline
-        response, transport = None, [None]
+        connection, response, worker = None, None, None
+        transport = [None]
         finished = threading.Event()
-        worker = threading.Thread(target=_enforce_deadline, args=(connection, transport, finished, self.deadline),
-                                  daemon=True, name="thermal-webhook-deadline")
-        worker.start()
+        successful = False
         try:
+            connection = self.connection(self.host, self.address)
+            expires = time.monotonic() + self.deadline
+            worker = threading.Thread(target=_enforce_deadline, args=(connection, transport, finished, self.deadline),
+                                      daemon=True, name="thermal-webhook-deadline")
+            worker.start()
             connection.request("POST", self.path, payload, {"Content-Type": "application/json", "User-Agent": "thermal-watch/1.0", "Connection": "close"})
             transport[0] = getattr(connection, "sock", None)
             response = connection.getresponse()
             response.read(1024)
-            return time.monotonic() < expires and 200 <= response.status < 300
+            successful = time.monotonic() < expires and 200 <= response.status < 300
         except (OSError, http.client.HTTPException):
-            return False
+            successful = False
         finally:
             finished.set()
-            worker.join()
-            if response is not None:
-                response.close()
-            connection.close()
+            if worker is not None and worker.ident is not None:
+                worker.join()
+            for resource in (response, connection):
+                if resource is not None:
+                    try:
+                        resource.close()
+                    except (OSError, http.client.HTTPException):
+                        pass
+        return successful

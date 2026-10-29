@@ -103,9 +103,9 @@ class Monitor:
                 raise ValueError("Unknown sensor")
             now = self.clock()
             observed_at = now if observed_at is None else observed_at
-            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not -100 <= value <= 350:
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not -100 <= value <= 350 or not math.isfinite(value):
                 raise ValueError("Reading must be a finite Celsius value between -100 and 350")
-            if isinstance(observed_at, bool) or not isinstance(observed_at, (int, float)) or not math.isfinite(observed_at) or observed_at < 0 or observed_at > now + 5:
+            if isinstance(observed_at, bool) or not isinstance(observed_at, (int, float)) or observed_at < 0 or observed_at > now + 5 or not math.isfinite(observed_at):
                 raise ValueError("Reading timestamp is invalid or too far in the future")
             state, rule = self.states[sensor], self.rules[sensor]
             clock_rolled_back = state["observed_at"] is not None and state["observed_at"] > now + 5
@@ -176,7 +176,8 @@ class Monitor:
                 rule = self.rules[sensor]
                 reference = state["observed_at"] if state["observed_at"] is not None else self.started
                 if reference > now + 5:
-                    self.fault(sensor, "System clock moved backwards; waiting for a current reading")
+                    if state["fault"] is None:
+                        self.fault(sensor, "System clock moved backwards; waiting for a current reading")
                     continue
                 if now - reference > rule.stale_seconds and not state["stale"]:
                     state["stale"] = True

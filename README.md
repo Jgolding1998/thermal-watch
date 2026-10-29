@@ -76,6 +76,8 @@ No destination or credential is shipped. The endpoint must use HTTPS on port 443
 
 Only new events created after this process starts are eligible for delivery, including a stale event detected during startup after the producer stopped while the dashboard was off. Historical events are not replayed. Each receives one attempt with a four-second socket timeout per network operation and a 10-second limit for the whole attempt, so an endpoint that drips its response cannot hold later alerts back. On Windows, a read already blocked when the limit passes can take one more socket timeout to stop. The local log records `sent` or `failed`; there is no retry queue, delivery guarantee, or confirmation that a person read the message. A successful HTTP response means the endpoint accepted the request. Sensor ingestion runs on a separate thread from delivery.
 
+Transport setup failures mark the attempt failed without stopping later event delivery. Cleanup errors are contained; a verified successful HTTP response still counts as accepted. Shutdown gives workers one shared ten-second wait. If an attempt finishes after that wait, its result remains unrecorded and cannot update a closed database. It is not replayed on restart. A CSV parse that finishes late is discarded, and a late dashboard state request receives `503`.
+
 ```json
 {
   "source": "thermal-watch",

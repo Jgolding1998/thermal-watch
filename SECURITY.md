@@ -22,6 +22,8 @@ A user or program that can write your local config, CSV, database, or Python ins
 
 An outbound endpoint can receive sensor labels and event times only when you deliberately enable it. Treat webhook URLs as secrets and use your own secret storage. The process pins DNS for its lifetime, so restart it if your legitimate endpoint's address changes. Delivery is one attempt, with failure retained locally; a failed endpoint does not stop sensor ingestion.
 
+Transport construction and cleanup failures do not terminate the delivery worker. Shutdown waits a bounded interval for workers; a later result is not written after the application closes its delivery lifecycle. An attempt interrupted by shutdown can remain recorded as `local`, without a known delivery outcome, and is not retried after restart.
+
 Clock rollback is shown as an input fault until a current reading arrives. A physical sensor can still report a believable wrong value. This application cannot establish calibration, prevent physical tampering, or guarantee that an alert reaches a person.
 
 Database files, real readings, local config, screenshots of private installations, and environment files must stay out of Git. The included screenshots use simulated data only. Before publishing a fork, inspect both current files and Git history with a secret scanner and check commit-author privacy settings.

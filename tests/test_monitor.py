@@ -199,10 +199,10 @@ class MonitorTests(unittest.TestCase):
         self.assertEqual(self.state()["value_c"], -18)
 
     def test_nonfinite_sentinel_range_and_future_rejected(self):
-        for value in [math.nan, math.inf, -math.inf, -127, 351, True, "-18"]:
+        for value in [math.nan, math.inf, -math.inf, -127, 351, True, "-18", 10 ** 400, -(10 ** 400)]:
             with self.subTest(value=value), self.assertRaises(ValueError):
                 self.monitor.reading("freezer", value)
-        for stamp in [math.nan, math.inf, -1, True, 1006]:
+        for stamp in [math.nan, math.inf, -1, True, 1006, 10 ** 400]:
             with self.subTest(stamp=stamp), self.assertRaises(ValueError):
                 self.monitor.reading("freezer", -18, stamp)
 

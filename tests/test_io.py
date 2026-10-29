@@ -12,7 +12,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from thermal_watch.__main__ import main
-from thermal_watch.inputs import append_reading, ds18b20, read_csv
+from thermal_watch.inputs import SnapshotError, append_reading, apply_csv, ds18b20, parse_csv, read_csv
 from thermal_watch.monitor import Monitor, Rule
 from thermal_watch.notify import Webhook
 from thermal_watch.server import Application
@@ -104,6 +104,71 @@ class InputTests(unittest.TestCase):
         append_reading(self.path, "freezer", -19, 1001)
         read_csv(self.path, self.monitor)
         self.assertEqual(self.monitor.snapshot()["sensors"][0]["status"], "normal")
+
+    def test_clock_rollback_with_stale_future_row_does_not_rewrite_database_each_poll(self):
+        self.monitor.clock = lambda: 5000
+        append_reading(self.path, "freezer", -18, 5000)
+        app = Application(self.monitor, self.path)
+        app.poll()
+        self.monitor.clock = lambda: 1000
+        app.poll()
+        changes = self.monitor.db.total_changes
+        for _ in range(10):
+            app.poll()
+        self.assertEqual(self.monitor.db.total_changes, changes)
+        self.assertEqual(self.monitor.snapshot()["sensors"][0]["status"], "fault")
+        self.assertEqual([event["kind"] for event in self.monitor.snapshot()["events"]].count("fault"), 1)
+
+    def test_writer_rejects_huge_integers_as_invalid_values(self):
+        for value, observed_at in [(10 ** 400, 1000), (-(10 ** 400), 1000), (-18, 10 ** 400)]:
+            with self.subTest(value=value > 0, observed_at=observed_at > 1000), self.assertRaises(ValueError):
+                append_reading(self.path, "freezer", value, observed_at)
+        self.assertFalse(self.path.exists())
+
+    def test_parse_validates_without_monitor_or_database_access(self):
+        self.path.write_text("sensor,temperature_c,observed_at\nfreezer,-18,999\ncooker,nan,1000\nfreezer,-19,1000\n")
+        changes = self.monitor.db.total_changes
+        latest, count = parse_csv(self.path, frozenset({"freezer", "cooker"}))
+        self.assertEqual(count, 3)
+        self.assertEqual(latest["freezer"], {"sensor": "freezer", "temperature_c": "-19", "observed_at": "1000"})
+        self.assertEqual(latest["cooker"]["temperature_c"], "nan")
+        self.assertEqual(self.monitor.db.total_changes, changes)
+        self.assertEqual(self.monitor.snapshot()["sensors"][0]["status"], "waiting")
+        self.monitor.close()
+        self.assertEqual(parse_csv(self.path, {"freezer", "cooker"}), (latest, count))
+        self.monitor = Monitor([Rule("freezer", "Freezer", -24, -14)], clock=lambda: 1000)
+
+    def test_parse_rejects_whole_snapshot_before_any_apply(self):
+        self.monitor.reading("freezer", -18, 999)
+        changes = self.monitor.db.total_changes
+        for content in ["sensor,temperature_c,observed_at\nfreezer,-10,1000\nunknown,76,1000\n", "sensor,observed_at,temperature_c\nfreezer,1000,-10\n", "x" * 1_048_577]:
+            self.path.write_text(content)
+            with self.subTest(size=len(content)):
+                with self.assertRaises(ValueError):
+                    parse_csv(self.path, self.monitor.rules)
+                with self.assertRaises(ValueError) as raised:
+                    read_csv(self.path, self.monitor)
+                self.assertNotIsInstance(raised.exception, SnapshotError)
+                self.assertEqual(self.monitor.db.total_changes, changes)
+                self.assertEqual(self.monitor.snapshot()["sensors"][0]["value_c"], -18)
+
+    def test_apply_reproduces_final_row_contract(self):
+        monitor = Monitor([Rule("freezer", "Freezer", -24, -14), Rule("cooker", "Cooker", 60, 95)], clock=lambda: 1000)
+        self.addCleanup(monitor.close)
+        self.assertIsNone(apply_csv({"freezer": {"sensor": "freezer", "temperature_c": "-18", "observed_at": "1000"}}, monitor))
+        latest = {
+            "freezer": {"sensor": "freezer", "temperature_c": "-19", "observed_at": "1000"},
+            "cooker": {"sensor": "cooker", "temperature_c": "76", "observed_at": None},
+        }
+        with self.assertRaises(SnapshotError):
+            apply_csv(latest, monitor)
+        sensors = {item["id"]: item for item in monitor.snapshot()["sensors"]}
+        self.assertEqual((sensors["freezer"]["status"], sensors["freezer"]["value_c"]), ("normal", -18))
+        self.assertEqual(sensors["cooker"]["status"], "fault")
+        with self.assertRaises(SnapshotError):
+            apply_csv({"cooker": {"sensor": "cooker", "temperature_c": "76", "observed_at": "1000", None: ["extra"]}}, monitor)
+        apply_csv({"cooker": {"sensor": "cooker", "temperature_c": "76", "observed_at": "1000"}}, monitor)
+        self.assertEqual({item["id"]: item["status"] for item in monitor.snapshot()["sensors"]}, {"freezer": "normal", "cooker": "normal"})
 
     def test_invalid_final_row_faults_only_affected_sensor(self):
         monitor = Monitor([Rule("freezer", "Freezer", -24, -14), Rule("cooker", "Cooker", 60, 95)], clock=lambda: 1000)

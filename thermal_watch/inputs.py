@@ -4,6 +4,7 @@ import csv
 import io
 import math
 import os
+import sys
 import tempfile
 import time
 from contextlib import contextmanager
@@ -33,14 +34,20 @@ def _rows(path):
         raise ValueError("CSV structure is invalid") from None
 
 
-def read_csv(path: Path, monitor):
+def parse_csv(path: Path, sensors):
+    """Read and structurally validate a snapshot without touching a monitor."""
     latest, count = {}, 0
     for row in _rows(path):
         count += 1
         sensor = row.get("sensor", "")
-        if sensor not in monitor.rules:
+        if sensor not in sensors:
             raise ValueError("CSV contains an unconfigured sensor")
         latest[sensor] = row
+    return latest, count
+
+
+def apply_csv(latest, monitor):
+    """Apply each sensor's final row; invalid rows fault only that sensor."""
     invalid = False
     for sensor, row in latest.items():
         try:
@@ -52,6 +59,11 @@ def read_csv(path: Path, monitor):
             invalid = True
     if invalid:
         raise SnapshotError("CSV contains an invalid final reading")
+
+
+def read_csv(path: Path, monitor):
+    latest, count = parse_csv(path, monitor.rules)
+    apply_csv(latest, monitor)
     return count
 
 
@@ -116,12 +128,12 @@ def _replace(path, rows):
 
 
 def append_reading(path: Path, sensor: str, value: float, observed_at: float | None = None):
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not -100 <= value <= 350:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not -100 <= value <= 350 or not math.isfinite(value):
         raise ValueError("Value must be finite and between -100 and 350 Celsius")
     if not sensor or len(sensor) > 48 or not all(c.isalnum() or c in "_-" for c in sensor):
         raise ValueError("Invalid sensor ID")
     observed_at = time.time() if observed_at is None else observed_at
-    if isinstance(observed_at, bool) or not isinstance(observed_at, (int, float)) or not math.isfinite(observed_at) or observed_at < 0:
+    if isinstance(observed_at, bool) or not isinstance(observed_at, (int, float)) or not 0 <= observed_at <= sys.float_info.max or not math.isfinite(observed_at):
         raise ValueError("Timestamp must be finite and nonnegative")
     with _writer_lock(path):
         latest = {}
