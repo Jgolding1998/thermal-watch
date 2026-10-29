@@ -6,6 +6,7 @@ import json
 import socket
 import ssl
 import threading
+import time
 from urllib.parse import urlsplit
 
 
@@ -41,11 +42,11 @@ class PinnedHTTPS(http.client.HTTPSConnection):
             raise
 
 
-def _enforce_deadline(connection, finished, seconds):
+def _enforce_deadline(connection, transport, finished, seconds):
     if finished.wait(seconds):
         return
     while not finished.wait(0.05):
-        sock = getattr(connection, "sock", None)
+        sock = transport[0] or getattr(connection, "sock", None)
         if sock is not None:
             try:
                 socket.socket.shutdown(sock, socket.SHUT_RDWR)
@@ -74,15 +75,23 @@ class Webhook:
         if len(payload) > 8192:
             return False
         connection = self.connection(self.host, self.address)
+        expires = time.monotonic() + self.deadline
+        response, transport = None, [None]
         finished = threading.Event()
-        threading.Thread(target=_enforce_deadline, args=(connection, finished, self.deadline), daemon=True).start()
+        worker = threading.Thread(target=_enforce_deadline, args=(connection, transport, finished, self.deadline),
+                                  daemon=True, name="thermal-webhook-deadline")
+        worker.start()
         try:
             connection.request("POST", self.path, payload, {"Content-Type": "application/json", "User-Agent": "thermal-watch/1.0", "Connection": "close"})
+            transport[0] = getattr(connection, "sock", None)
             response = connection.getresponse()
             response.read(1024)
-            return 200 <= response.status < 300
+            return time.monotonic() < expires and 200 <= response.status < 300
         except (OSError, http.client.HTTPException):
             return False
         finally:
             finished.set()
+            worker.join()
+            if response is not None:
+                response.close()
             connection.close()

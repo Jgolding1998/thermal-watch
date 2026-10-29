@@ -83,6 +83,7 @@ class HTTPTests(unittest.TestCase):
                 self.assertNotIn(marker, body)
         self.assertEqual(self.request("/api/state")[0], 200)
 
+    @patch("thermal_watch.server.HEADER_SECONDS", 0.3)
     def test_header_deadline_is_absolute_for_a_slow_drip_client(self):
         connection = socket.create_connection(self.server.server_address, timeout=10)
         stopped, received = threading.Event(), []
@@ -94,13 +95,12 @@ class HTTPTests(unittest.TestCase):
             except OSError:
                 pass
         started = time.monotonic()
-        with patch("thermal_watch.server.HEADER_SECONDS", 0.3):
-            threading.Thread(target=send, daemon=True).start()
-            try:
-                while chunk := connection.recv(4096):
-                    received.append(chunk)
-            except OSError:
-                pass
+        threading.Thread(target=send, daemon=True).start()
+        try:
+            while chunk := connection.recv(4096):
+                received.append(chunk)
+        except OSError:
+            pass
         stopped.set()
         connection.close()
         self.assertLess(time.monotonic() - started, 3)

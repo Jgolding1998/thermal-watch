@@ -170,6 +170,9 @@ class FakeResponse:
     def read(self, *_):
         return b""
 
+    def close(self):
+        pass
+
 
 class FakeConnection:
     response = FakeResponse()
@@ -221,6 +224,12 @@ class SlowDripServer:
 
 
 class WebhookTests(unittest.TestCase):
+    def test_elapsed_delivery_is_not_success_even_when_the_response_returns_normally(self):
+        with patch("thermal_watch.notify.time.monotonic", side_effect=[100, 111]):
+            self.assertFalse(Webhook("https://example.test", resolver=public_resolver,
+                                     connection=FakeConnection, deadline=10).send({"id": 1}))
+        self.assertFalse(any(thread.name == "thermal-webhook-deadline" for thread in threading.enumerate()))
+
     def assert_abandoned_quickly(self, hook):
         started = time.monotonic()
         self.assertFalse(hook.send({"id": 1}))
@@ -233,6 +242,16 @@ class WebhookTests(unittest.TestCase):
             def __init__(self, *_):
                 super().__init__("127.0.0.1", server.port, timeout=4)
         self.assert_abandoned_quickly(Webhook("https://example.test", resolver=public_resolver, connection=Plain, deadline=0.3))
+
+    def test_slow_response_body_is_aborted_after_connection_ownership_changes(self):
+        for headers in (b"Content-Length: 10000\r\n", b"Connection: close\r\n"):
+            with self.subTest(headers=headers):
+                server = SlowDripServer(b"HTTP/1.1 200 OK\r\n" + headers + b"\r\n", b"x")
+                self.addCleanup(server.close)
+                class Plain(http.client.HTTPConnection):
+                    def __init__(self, *_):
+                        super().__init__("127.0.0.1", server.port, timeout=4)
+                self.assert_abandoned_quickly(Webhook("https://example.test", resolver=public_resolver, connection=Plain, deadline=0.3))
 
     def test_opposite_alarm_deliveries_never_include_a_false_all_clear(self):
         for first, opposite, expected in [(-10, -30, ["high", "low"]), (-30, -10, ["low", "high"])]:
