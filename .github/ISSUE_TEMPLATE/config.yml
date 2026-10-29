@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Project feedback
+    url: https://github.com/Jgolding1998/Jgolding1998/issues/new?template=feedback.yml&title=%5Bthermal-watch%5D%20
+    about: Suggestions, likes, dislikes and problems go to the central feedback board. Select thermal-watch in the form.
+  - name: Security reporting
+    url: https://github.com/Jgolding1998/thermal-watch/blob/main/SECURITY.md
+    about: Read this policy for suspected vulnerabilities. Do not post details in public feedback.

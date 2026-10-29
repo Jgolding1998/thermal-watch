@@ -24,7 +24,8 @@ class Application:
         self.stopped = threading.Event()
         self.input_error = None
         self.started = time.monotonic()
-        self.watermark = max((e["id"] for e in monitor.snapshot()["events"]), default=0)
+        self.watermark = monitor.event_watermark()
+        monitor.tick()
         self.threads = []
 
     def poll(self):

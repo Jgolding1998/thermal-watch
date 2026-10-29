@@ -27,7 +27,7 @@ class Rule:
         if not isinstance(self.label, str) or not 1 <= len(self.label) <= 80:
             raise ValueError("Sensor labels must use 1 to 80 characters")
         numbers = (self.minimum_c, self.maximum_c, self.hysteresis_c, self.dwell_seconds, self.stale_seconds, self.cooldown_seconds)
-        if any(isinstance(n, bool) or not isinstance(n, (int, float)) or not math.isfinite(n) for n in numbers):
+        if any(isinstance(n, bool) or not isinstance(n, (int, float)) for n in numbers):
             raise ValueError("Thresholds and timing must be finite numbers")
         if not -100 <= self.minimum_c < self.maximum_c <= 350:
             raise ValueError("Thresholds must be ordered and between -100 and 350 Celsius")
@@ -133,12 +133,12 @@ class Monitor:
     def _evaluate(self, sensor, value, observed_at):
         state, rule = self.states[sensor], self.rules[sensor]
         old_alarm = state["alarm"]
-        cleared = (old_alarm == "low" and value >= rule.minimum_c + rule.hysteresis_c) or (old_alarm == "high" and value <= rule.maximum_c - rule.hysteresis_c)
+        direction = "low" if value < rule.minimum_c else "high" if value > rule.maximum_c else None
+        cleared = direction is None and ((old_alarm == "low" and value >= rule.minimum_c + rule.hysteresis_c) or (old_alarm == "high" and value <= rule.maximum_c - rule.hysteresis_c))
         if cleared:
             self._event(sensor, "recovered", f"{rule.label}: temperature returned inside the recovery band")
             state["alarm"] = None
-        direction = "low" if value < rule.minimum_c else "high" if value > rule.maximum_c else None
-        if state["alarm"]:
+        if state["alarm"] and direction in (None, state["alarm"]):
             state["pending"] = None
             state["pending_since"] = None
             return
@@ -198,6 +198,10 @@ class Monitor:
                 sensors.append({"id": sensor, "label": rule.label, "value_c": state["value_c"], "minimum_c": rule.minimum_c, "maximum_c": rule.maximum_c, "status": status, "pending": state["pending"], "alarm": state["alarm"], "age_seconds": None if state["observed_at"] is None else max(0, round(now-state["observed_at"], 1)), "fault": state["fault"], "history": [{"value_c": r["value"], "at": r["observed"]} for r in reversed(history)]})
             events = [dict(row) for row in self.db.execute("SELECT id,sensor,kind,created,message,delivery FROM events ORDER BY id DESC LIMIT 60")]
             return {"now": now, "sensors": sensors, "events": events}
+
+    def event_watermark(self):
+        with self.lock:
+            return self.db.execute("SELECT COALESCE(MAX(id), 0) FROM events").fetchone()[0]
 
     def undelivered(self):
         with self.lock:

@@ -45,6 +45,8 @@ CSV columns are exactly `sensor,temperature_c,observed_at`, with a Unix timestam
 
 A high alarm at a maximum of -14 °C with 1 °C hysteresis clears at -15 °C. A quick dip back to -14.2 °C does not send a recovery followed by another alert. Missing data resets a pending dwell period. Restarting also resets a pending period, while a persisted active alarm stays active without producing a duplicate alarm event.
 
+A jump directly to the opposite out-of-range condition does not send an all-clear. The existing alarm stays latched while the opposite condition completes its dwell, then switches to the new alarm. Recovery requires a reading inside the normal range that also meets the active alarm's hysteresis threshold.
+
 Every new alarm episode after a recovery sends a new event, even if the same condition recurs immediately. Sustained alarms do not repeat notifications. The legacy `cooldown_seconds` field is accepted for configuration compatibility, but has no effect in this release: a cooldown must never suppress a real transition back into an alarm.
 
 The built-in writer atomically replaces a bounded current snapshot rather than appending forever. It holds an operating-system file lock while preserving the most recent row for every sensor, so multiple built-in producers can safely share one snapshot. A dead producer leaves its old reading in place; it becomes visibly stale.
@@ -72,7 +74,7 @@ python -m thermal_watch serve --csv readings.csv --config config.local.json --we
 
 No destination or credential is shipped. The endpoint must use HTTPS on port 443 and resolve exclusively to public IP addresses. One address is pinned for the process lifetime, with IPv4 preferred on dual-stack hosts. Certificate verification still uses the hostname, redirects are rejected, and environment proxy settings are not used. There is no cross-address failover or retry; use an endpoint reachable over its preferred address. Local or private network webhook endpoints are intentionally unsupported.
 
-Only new events created after this process starts are eligible for delivery. Each receives one attempt with a four-second socket timeout per network operation. The local log records `sent` or `failed`; there is no retry queue, delivery guarantee, or confirmation that a person read the message. A successful HTTP response means the endpoint accepted the request. Sensor ingestion runs on a separate thread from delivery.
+Only new events created after this process starts are eligible for delivery, including a stale event detected during startup after the producer stopped while the dashboard was off. Historical events are not replayed. Each receives one attempt with a four-second socket timeout per network operation. The local log records `sent` or `failed`; there is no retry queue, delivery guarantee, or confirmation that a person read the message. A successful HTTP response means the endpoint accepted the request. Sensor ingestion runs on a separate thread from delivery.
 
 ```json
 {
@@ -113,7 +115,7 @@ The split keeps device input and network transport out of the state machine. Tes
 python -m unittest discover -s tests -v
 ```
 
-The 45 automated tests cover threshold boundaries, high and low excursions, dwell interruptions, recovery hysteresis, recurring alarm episodes, stale sensors, malformed and nonfinite input, timestamp rollback, restart behavior, bounded history, CSV replay and compaction, concurrent producer processes, DS18B20 CRC and range checks, webhook validation and failures, dual-stack address preference, hostile origins, traversal attempts, and the absence of a mutating API. Repeated unchanged sensor faults do not rewrite the database.
+The 57 automated tests cover threshold boundaries, high and low excursions, dwell interruptions, recovery hysteresis, opposite alarm transitions, recurring alarm episodes, stale sensors, malformed and nonfinite input, timestamp rollback, startup stale delivery, bounded history, CSV replay and compaction, concurrent producer processes, DS18B20 CRC and range checks, webhook validation and failures, dual-stack address preference, hostile origins, traversal attempts, and the absence of a mutating API. Repeated unchanged sensor faults do not rewrite the database.
 
 An optional browser smoke test needs Node.js and Playwright in your development environment:
 
@@ -124,9 +126,9 @@ npx playwright install chromium
 node tests/browser_smoke.cjs
 ```
 
-It checks desktop and 390-pixel mobile layouts for horizontal overflow, switches units, verifies the demo label, interrupts API requests to check the connection-loss warning, and captures the screenshots in `docs/`. Set `THERMAL_BROWSER_CHANNEL=chrome` to use an installed Chrome instead of downloaded Chromium.
+It checks desktop and 390-pixel mobile layouts, unit conversion, the demo label, hostile labels, replacement snapshots and empty history, and the connection-loss warning. Screenshots are saved in `docs/`, or the directory set by `THERMAL_SCREENSHOT_DIR`. Set `THERMAL_BROWSER_CHANNEL=chrome` to use an installed Chrome instead of downloaded Chromium.
 
-Actual verification on October 28, 2026: 45 Python tests passed on Python 3.12; the browser smoke test passed in headless Chrome at 1440 and 390 pixels. Screenshots were visually inspected. Independent review reproduced a suppressed recurring alarm and an unbounded producer file; regression tests now verify both fixes. CI is configured separately for Python 3.11 through 3.13 on Linux and Windows. Physical probes, an actual freezer or cooker, and a real external notification endpoint were not tested.
+Actual verification on October 28, 2026: 57 Python tests passed on Python 3.12; the browser smoke test passed in headless Edge at 1440 and 390 pixels. Screenshots were visually inspected. Independent review reproduced a suppressed recurring alarm and an unbounded producer file; regression tests now verify both fixes. CI is configured separately for Python 3.11 through 3.13 on Linux and Windows. Physical probes, an actual freezer or cooker, and a real external notification endpoint were not tested.
 
 ## Boundaries
 

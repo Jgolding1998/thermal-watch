@@ -1,10 +1,13 @@
 import json
+import contextlib
+import io
 import math
 import tempfile
 import unittest
 from pathlib import Path
 
 from thermal_watch.monitor import Monitor, Rule, load_rules
+from thermal_watch.__main__ import main
 
 
 class Clock:
@@ -74,6 +77,57 @@ class MonitorTests(unittest.TestCase):
         self.read(-15, 1)
         self.assertEqual(self.state()["status"], "normal")
         self.assertEqual(self.kinds().count("recovered"), 1)
+
+    def test_opposite_excursion_requires_dwell_without_false_recovery(self):
+        for first, opposite, original_kind, opposite_kind in [(-10, -30, "high", "low"), (-30, -10, "low", "high")]:
+            with self.subTest(original=original_kind):
+                clock = Clock()
+                monitor = Monitor([self.rule], clock=clock)
+                try:
+                    monitor.reading("freezer", first)
+                    clock.advance(10)
+                    monitor.reading("freezer", first)
+                    clock.advance(1)
+                    monitor.reading("freezer", opposite)
+                    state = monitor.snapshot()["sensors"][0]
+                    self.assertEqual(state["alarm"], original_kind)
+                    self.assertEqual(state["pending"], opposite_kind)
+                    clock.advance(9.9)
+                    monitor.reading("freezer", opposite)
+                    self.assertEqual(monitor.snapshot()["sensors"][0]["alarm"], original_kind)
+                    clock.advance(.1)
+                    monitor.reading("freezer", opposite)
+                    state = monitor.snapshot()["sensors"][0]
+                    self.assertEqual(state["alarm"], opposite_kind)
+                    self.assertIsNone(state["pending"])
+                    self.assertEqual([e["kind"] for e in reversed(monitor.snapshot()["events"])], [original_kind, opposite_kind])
+                finally:
+                    monitor.close()
+
+    def test_opposite_pending_resets_when_reading_returns_to_latched_alarm(self):
+        self.read(-10)
+        self.read(-10, 10)
+        self.read(-30, 1)
+        self.read(-10, 9)
+        self.assertIsNone(self.state()["pending"])
+        self.read(-30, 1)
+        self.read(-30, 9)
+        self.assertEqual(self.state()["alarm"], "high")
+        self.read(-30, 1)
+        self.assertEqual(self.state()["alarm"], "low")
+        self.assertNotIn("recovered", self.kinds())
+
+    def test_opposite_excursion_can_recover_only_after_returning_in_range(self):
+        self.read(-10)
+        self.read(-10, 10)
+        self.read(-30, 1)
+        self.read(-14.5, 1)
+        self.assertEqual(self.state()["alarm"], "high")
+        self.assertIsNone(self.state()["pending"])
+        self.assertNotIn("recovered", self.kinds())
+        self.read(-15, 1)
+        self.assertIsNone(self.state()["alarm"])
+        self.assertEqual(self.kinds(), ["recovered", "high"])
 
     def test_repeated_alarm_does_not_repeat_events(self):
         self.read(-10)
@@ -219,6 +273,24 @@ class MonitorTests(unittest.TestCase):
 
 
 class ConfigurationTests(unittest.TestCase):
+    def test_every_numeric_rule_field_rejects_huge_and_nonfinite_values(self):
+        for field in ("minimum_c", "maximum_c", "hysteresis_c", "dwell_seconds", "stale_seconds", "cooldown_seconds"):
+            for value in (10 ** 400, -(10 ** 400), math.inf, -math.inf, math.nan, True, "1"):
+                data = dict(sensor="freezer", label="Freezer", minimum_c=-24, maximum_c=-14)
+                data[field] = value
+                with self.subTest(field=field, kind=type(value).__name__), self.assertRaises(ValueError):
+                    Rule(**data)
+
+    def test_huge_number_in_local_config_is_a_controlled_cli_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config.json"
+            path.write_text(json.dumps({"sensors":[dict(sensor="freezer", label="Private fixture label", minimum_c=10 ** 400, maximum_c=-14)]}))
+            output = io.StringIO()
+            with contextlib.redirect_stderr(output):
+                result = main(["serve", "--config", str(path)])
+            self.assertEqual(result, 2)
+            self.assertEqual(output.getvalue(), "Cannot start: ValueError. Check your command and local configuration.\n")
+
     def test_invalid_rules(self):
         for kwargs in [{"minimum_c": -1, "maximum_c": -10}, {"hysteresis_c": 10}, {"dwell_seconds": -1}, {"stale_seconds": 0}, {"minimum_c": math.nan}, {"label": ""}, {"sensor": "../outside"}]:
             data = dict(sensor="freezer", label="Freezer", minimum_c=-24, maximum_c=-14)

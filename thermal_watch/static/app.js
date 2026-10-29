@@ -4,6 +4,7 @@ const $ = (selector, root = document) => root.querySelector(selector);
 let unit = "C";
 let lastState = null;
 const cards = new Map();
+const emptyEvents = $("#event-list .empty-state").cloneNode(true);
 const statusLabels = {normal: "In range", pending: "Checking excursion", low: "Too cold", high: "Too hot", stale: "Sensor offline", fault: "Input fault", waiting: "Awaiting reading"};
 const attention = new Set(["low", "high", "stale", "fault"]);
 const format = value => value === null ? "..." : (unit === "F" ? value * 9 / 5 + 32 : value).toFixed(1);
@@ -11,7 +12,11 @@ const text = (selector, value, root = document) => { $(selector, root).textConte
 
 function chart(card, history, minimum, maximum) {
   const values = history.map(point => point.value_c).filter(Number.isFinite);
-  if (!values.length) return;
+  if (!values.length) {
+    $(".chart-line", card).removeAttribute("d");
+    $(".chart-area", card).removeAttribute("d");
+    return;
+  }
   const low = Math.min(minimum, ...values) - 2;
   const high = Math.max(maximum, ...values) + 2;
   const points = values.map((value, i) => [values.length === 1 ? 480 : i / (values.length - 1) * 480, 78 - (value - low) / (high - low) * 60]);
@@ -49,9 +54,12 @@ function renderSensor(sensor) {
 
 function renderEvents(events) {
   text("#event-count", events.length);
-  if (!events.length) return;
   const list = $("#event-list");
   list.replaceChildren();
+  if (!events.length) {
+    list.append(emptyEvents.cloneNode(true));
+    return;
+  }
   for (const event of events) {
     const row = document.createElement("div"); row.className = "event"; row.dataset.kind = event.kind;
     const icon = document.createElement("span"); icon.className = "event-icon"; icon.textContent = ["recovered", "online"].includes(event.kind) ? "✓" : "!";
@@ -78,6 +86,13 @@ function render(state) {
   text("#updated", `Updated ${new Date(state.now * 1000).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit",second:"2-digit"})}`);
   $("#input-error").hidden = !state.input_error;
   text("#input-error", state.input_error || "");
+  const present = new Set(state.sensors.map(sensor => sensor.id));
+  for (const [id, card] of cards) {
+    if (!present.has(id)) {
+      card.remove();
+      cards.delete(id);
+    }
+  }
   state.sensors.forEach(renderSensor);
   renderEvents(state.events);
 }

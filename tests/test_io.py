@@ -136,6 +136,19 @@ class InputTests(unittest.TestCase):
         self.assertIsNotNone(app.snapshot()["input_error"])
         self.assertEqual(app.snapshot()["sensors"][0]["status"], "fault")
 
+    def test_unknown_sensor_rejects_the_snapshot_and_faults_all_configured_sensors(self):
+        monitor = Monitor([Rule("freezer", "Freezer", -24, -14), Rule("cooker", "Cooker", 60, 95)], clock=lambda: 1000)
+        try:
+            monitor.reading("freezer", -18)
+            monitor.reading("cooker", 76)
+            self.path.write_text("sensor,temperature_c,observed_at\nfreezer,-18,1000\nunknown,76,1000\n")
+            app = Application(monitor, self.path)
+            app.poll()
+            self.assertIsNotNone(app.input_error)
+            self.assertEqual([sensor["status"] for sensor in app.snapshot()["sensors"]], ["fault", "fault"])
+        finally:
+            monitor.close()
+
     def test_cli_requires_explicit_live_mode_for_webhook(self):
         with patch("sys.stderr", new=io.StringIO()):
             self.assertEqual(main(["serve", "--webhook"]), 2)
@@ -176,6 +189,61 @@ def public_resolver(*_, **__):
 
 
 class WebhookTests(unittest.TestCase):
+    def test_opposite_alarm_deliveries_never_include_a_false_all_clear(self):
+        for first, opposite, expected in [(-10, -30, ["high", "low"]), (-30, -10, ["low", "high"])]:
+            with self.subTest(expected=expected):
+                now = [1000]
+                monitor = Monitor([Rule("freezer", "Freezer", -24, -14, dwell_seconds=0)], clock=lambda: now[0])
+                class CapturingConnection(FakeConnection):
+                    requests = []
+                try:
+                    hook = Webhook("https://alerts.example.test", resolver=public_resolver, connection=CapturingConnection)
+                    app = Application(monitor, Path("unused.csv"), hook)
+                    monitor.reading("freezer", first)
+                    now[0] += 1
+                    monitor.reading("freezer", opposite)
+                    app.deliver()
+                    app.deliver()
+                    self.assertEqual([r[2]["event"]["kind"] for r in CapturingConnection.requests], expected)
+                    self.assertEqual([e["delivery"] for e in monitor.snapshot()["events"]], ["sent", "sent"])
+                finally:
+                    monitor.close()
+
+    def test_restart_stale_event_gets_one_attempt_without_replaying_history(self):
+        for successful in (True, False):
+            with self.subTest(successful=successful), tempfile.TemporaryDirectory() as directory:
+                now = [1000]
+                rule = Rule("freezer", "Freezer", -24, -14, stale_seconds=20)
+                path = Path(directory) / "state.db"
+                previous = Monitor([rule], path, clock=lambda: now[0])
+                previous.fault("freezer")
+                previous.reading("freezer", -18)
+                previous.close()
+                now[0] += 21
+                monitor = Monitor([rule], path, clock=lambda: now[0])
+                class Notifier:
+                    def __init__(self):
+                        self.events = []
+                    def send(self, event):
+                        self.events.append(event)
+                        return successful
+                try:
+                    notifier = Notifier()
+                    app = Application(monitor, Path("unused.csv"), notifier)
+                    self.assertEqual(app.watermark, 1)
+                    app.deliver()
+                    app.deliver()
+                    self.assertEqual([event["kind"] for event in notifier.events], ["stale"])
+                    self.assertEqual(app.watermark, 2)
+                    events = monitor.snapshot()["events"]
+                    self.assertEqual(events[0]["delivery"], "sent" if successful else "failed")
+                    self.assertEqual(events[1]["delivery"], "local")
+                    restarted_app = Application(monitor, Path("unused.csv"), notifier)
+                    restarted_app.deliver()
+                    self.assertEqual(len(notifier.events), 1)
+                finally:
+                    monitor.close()
+
     def test_valid_post_contract_and_dns_pinning(self):
         hook = Webhook("https://alerts.example.test/inbox", resolver=public_resolver, connection=FakeConnection)
         event = {"id": 7, "kind": "high", "message": "Freezer high"}
@@ -199,6 +267,38 @@ class WebhookTests(unittest.TestCase):
         for address in ["127.0.0.1", "192.168.1.2", "169.254.169.254", "::1", "fd00::1"]:
             with self.subTest(address=address), self.assertRaises(ValueError):
                 Webhook("https://example.test", resolver=lambda *a, **k: [(2, 1, 6, "", (address, 443))])
+
+    def test_special_and_translated_ipv6_destinations_are_rejected(self):
+        addresses = [
+            "fec0::1", "fe80::1", "ff02::1", "2001:20::1", "2001:10::1",
+            "2001::1", "2001:db8::1", "2002:7f00:1::", "2002:5db8:d822::",
+            "64:ff9b::7f00:1", "64:ff9b::5db8:d822", "64:ff9b:1::1",
+            "3fff::1", "2001:4860:4860::8888%eth0",
+        ]
+        for address in addresses:
+            with self.subTest(address=address), self.assertRaises(ValueError):
+                Webhook("https://example.test", resolver=lambda *a, **k: [(10, 1, 6, "", (address, 443))])
+
+    def test_ipv4_mapped_destinations_use_the_embedded_ipv4_policy(self):
+        for address in ["::ffff:127.0.0.1", "::ffff:192.168.1.2", "::ffff:169.254.169.254", "::ffff:224.0.0.1", "::ffff:240.0.0.1"]:
+            with self.subTest(address=address), self.assertRaises(ValueError):
+                Webhook("https://example.test", resolver=lambda *a, **k: [(10, 1, 6, "", (address, 443))])
+        address = "::ffff:93.184.216.34"
+        hook = Webhook("https://example.test", resolver=lambda *a, **k: [(10, 1, 6, "", (address, 443))])
+        self.assertEqual(hook.address, address)
+
+    def test_public_ipv4_and_ipv6_destinations_remain_accepted(self):
+        for address in ["93.184.216.34", "2001:4860:4860::8888"]:
+            with self.subTest(address=address):
+                hook = Webhook("https://example.test", resolver=lambda *a, **k: [(10 if ":" in address else 2, 1, 6, "", (address, 443))])
+                self.assertEqual(hook.address, address)
+
+    def test_one_nonpublic_dns_result_rejects_a_mixed_answer(self):
+        for address in ["127.0.0.1", "fec0::1", "64:ff9b::7f00:1"]:
+            def mixed(*_, **__):
+                return [(2, 1, 6, "", ("93.184.216.34", 443)), (10, 1, 6, "", (address, 443))]
+            with self.subTest(address=address), self.assertRaises(ValueError):
+                Webhook("https://example.test", resolver=mixed)
 
     def test_failure_and_redirect_are_not_success(self):
         class Failing(FakeConnection):

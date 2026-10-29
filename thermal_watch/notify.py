@@ -8,6 +8,24 @@ import ssl
 from urllib.parse import urlsplit
 
 
+IPV6_PUBLIC_UNICAST = ipaddress.ip_network("2000::/3")
+IPV6_SPECIAL = tuple(ipaddress.ip_network(value) for value in ("2001::/23", "2001:db8::/32", "2002::/16", "3fff::/20"))
+
+
+def _public_address(address):
+    parsed = ipaddress.ip_address(address)
+    effective = parsed
+    if isinstance(parsed, ipaddress.IPv6Address):
+        if parsed.scope_id is not None:
+            return False
+        if parsed.ipv4_mapped is not None:
+            effective = parsed.ipv4_mapped
+        elif (parsed.is_site_local or parsed not in IPV6_PUBLIC_UNICAST
+              or any(parsed in network for network in IPV6_SPECIAL)):
+            return False
+    return effective.is_global and not effective.is_multicast and not effective.is_reserved
+
+
 class PinnedHTTPS(http.client.HTTPSConnection):
     def __init__(self, hostname, address):
         super().__init__(hostname, timeout=4, context=ssl.create_default_context())
@@ -28,7 +46,7 @@ class Webhook:
         if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.port not in {None, 443} or parsed.fragment:
             raise ValueError("Webhook requires a public HTTPS endpoint on port 443 without credentials or a fragment")
         addresses = {item[4][0] for item in resolver(parsed.hostname, 443, type=socket.SOCK_STREAM)}
-        if not addresses or any(not ipaddress.ip_address(address).is_global for address in addresses):
+        if not addresses or any(not _public_address(address) for address in addresses):
             raise ValueError("Webhook DNS must resolve exclusively to public addresses")
         self.host = parsed.hostname
         self.address = sorted(addresses, key=lambda address: (ipaddress.ip_address(address).version, address))[0]
