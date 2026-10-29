@@ -161,6 +161,18 @@ class MonitorTests(unittest.TestCase):
         self.read(-18, 1)
         self.assertEqual(self.state()["status"], "normal")
 
+    def test_unchanged_fault_does_not_rewrite_database(self):
+        self.read(-18)
+        self.monitor.fault("freezer")
+        changes = self.monitor.db.total_changes
+        for _ in range(100):
+            self.monitor.fault("freezer")
+        self.assertEqual(self.monitor.db.total_changes, changes)
+        self.monitor.fault("freezer", "Producer reported a different fault")
+        self.assertGreater(self.monitor.db.total_changes, changes)
+        self.assertEqual(self.state()["fault"], "Producer reported a different fault")
+        self.assertEqual(self.kinds().count("fault"), 1)
+
     def test_readings_are_bounded(self):
         for _ in range(300):
             self.read(-18, 1)

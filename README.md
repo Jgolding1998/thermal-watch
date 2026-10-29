@@ -113,7 +113,7 @@ The split keeps device input and network transport out of the state machine. Tes
 python -m unittest discover -s tests -v
 ```
 
-The 44 automated tests cover threshold boundaries, high and low excursions, dwell interruptions, recovery hysteresis, recurring alarm episodes, stale sensors, malformed and nonfinite input, timestamp rollback, restart behavior, bounded history, CSV replay and compaction, concurrent producer processes, DS18B20 CRC and range checks, webhook validation and failures, dual-stack address preference, hostile origins, traversal attempts, and the absence of a mutating API.
+The 45 automated tests cover threshold boundaries, high and low excursions, dwell interruptions, recovery hysteresis, recurring alarm episodes, stale sensors, malformed and nonfinite input, timestamp rollback, restart behavior, bounded history, CSV replay and compaction, concurrent producer processes, DS18B20 CRC and range checks, webhook validation and failures, dual-stack address preference, hostile origins, traversal attempts, and the absence of a mutating API. Repeated unchanged sensor faults do not rewrite the database.
 
 An optional browser smoke test needs Node.js and Playwright in your development environment:
 
@@ -126,7 +126,7 @@ node tests/browser_smoke.cjs
 
 It checks desktop and 390-pixel mobile layouts for horizontal overflow, switches units, verifies the demo label, interrupts API requests to check the connection-loss warning, and captures the screenshots in `docs/`. Set `THERMAL_BROWSER_CHANNEL=chrome` to use an installed Chrome instead of downloaded Chromium.
 
-Actual verification on October 28, 2026: 44 Python tests passed on Python 3.12; the browser smoke test passed in headless Chrome at 1440 and 390 pixels. Screenshots were visually inspected. Independent review reproduced a suppressed recurring alarm and an unbounded producer file; regression tests now verify both fixes. CI is configured separately for Python 3.11 through 3.13 on Linux and Windows. Physical probes, an actual freezer or cooker, and a real external notification endpoint were not tested.
+Actual verification on October 28, 2026: 45 Python tests passed on Python 3.12; the browser smoke test passed in headless Chrome at 1440 and 390 pixels. Screenshots were visually inspected. Independent review reproduced a suppressed recurring alarm and an unbounded producer file; regression tests now verify both fixes. CI is configured separately for Python 3.11 through 3.13 on Linux and Windows. Physical probes, an actual freezer or cooker, and a real external notification endpoint were not tested.
 
 ## Boundaries
 

@@ -158,9 +158,12 @@ class Monitor:
             if sensor not in self.states:
                 return
             state = self.states[sensor]
+            message = message[:120]
+            if state["fault"] == message and state["pending"] is None and state["pending_since"] is None:
+                return
             if state["fault"] is None:
                 self._event(sensor, "fault", f"{self.rules[sensor].label}: invalid or unreadable sensor input")
-            state["fault"] = message[:120]
+            state["fault"] = message
             state["pending"] = None
             state["pending_since"] = None
             self._save(sensor)
