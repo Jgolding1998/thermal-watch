@@ -42,6 +42,23 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(headers["Cache-Control"], "no-store")
         self.assertNotIn("Access-Control-Allow-Origin", headers)
 
+    def test_second_dashboard_cannot_share_the_active_port(self):
+        other = None
+        try:
+            with self.assertRaises(OSError):
+                other = make_server(self.app, self.port)
+        finally:
+            if other is not None:
+                other.server_close()
+
+    @unittest.skipUnless(hasattr(socket, "SO_EXCLUSIVEADDRUSE"), "Windows exclusive socket option")
+    def test_windows_listener_excludes_reuse_address_contenders(self):
+        self.assertEqual(self.server.socket.getsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE), 1)
+        with socket.socket() as contender:
+            contender.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            with self.assertRaises(OSError):
+                contender.bind(self.server.server_address)
+
     def test_static_allowlist_and_traversal(self):
         for path in ["/", "/app.js", "/styles.css", "/health"]:
             with self.subTest(path=path):

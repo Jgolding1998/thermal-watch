@@ -26,9 +26,9 @@ def _rows(path):
     if len(content.encode("utf-8")) > MAX_BYTES:
         raise ValueError("Input exceeds the 1 MiB snapshot limit")
     reader = csv.DictReader(io.StringIO(content))
-    if reader.fieldnames != FIELDS:
-        raise ValueError("CSV header must be sensor,temperature_c,observed_at")
     try:
+        if reader.fieldnames != FIELDS:
+            raise ValueError("CSV header must be sensor,temperature_c,observed_at")
         yield from reader
     except csv.Error:
         raise ValueError("CSV structure is invalid") from None
