@@ -20,11 +20,15 @@ class SnapshotError(ValueError):
     """Invalid final rows were already marked as per-sensor faults."""
 
 
+class SnapshotTooLarge(ValueError):
+    """The snapshot is over MAX_BYTES; nothing in it was read or changed."""
+
+
 def _rows(path):
     with path.open(newline="", encoding="utf-8") as handle:
         content = handle.read(MAX_BYTES + 1)
     if len(content.encode("utf-8")) > MAX_BYTES:
-        raise ValueError("Input exceeds the 1 MiB snapshot limit")
+        raise SnapshotTooLarge("CSV snapshot is larger than the 1 MiB limit and was left unchanged; keep one current row per sensor, as the record and sensor commands do")
     reader = csv.DictReader(io.StringIO(content))
     try:
         if reader.fieldnames != FIELDS:

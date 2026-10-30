@@ -289,7 +289,9 @@ class ConfigurationTests(unittest.TestCase):
             with contextlib.redirect_stderr(output):
                 result = main(["serve", "--config", str(path)])
             self.assertEqual(result, 2)
-            self.assertEqual(output.getvalue(), "Cannot start: ValueError. Check your command and local configuration.\n")
+            self.assertEqual(output.getvalue(), "Cannot start: Thresholds must be ordered and between -100 and 350 Celsius.\n")
+            self.assertNotIn("Private fixture label", output.getvalue())
+            self.assertNotIn(directory, output.getvalue())
 
     def test_invalid_rules(self):
         for kwargs in [{"minimum_c": -1, "maximum_c": -10}, {"hysteresis_c": 10}, {"dwell_seconds": -1}, {"stale_seconds": 0}, {"minimum_c": math.nan}, {"label": ""}, {"sensor": "../outside"}]:

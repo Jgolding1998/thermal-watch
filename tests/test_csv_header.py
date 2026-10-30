@@ -38,7 +38,7 @@ class HeaderFailureTests(unittest.TestCase):
         with contextlib.redirect_stderr(error):
             result = main(["record", "--file", str(self.path), "--sensor", "freezer", "--value", "-18"])
         self.assertEqual(result, 2)
-        self.assertEqual(error.getvalue(), "Cannot start: ValueError. Check your command and local configuration.\n")
+        self.assertEqual(error.getvalue(), "Cannot record reading: CSV structure is invalid.\n")
 
     def test_polling_loop_survives_bad_header_and_recovers_on_replacement(self):
         monitor = Monitor([Rule("freezer", "Freezer", -24, -14)], clock=lambda: 1000)

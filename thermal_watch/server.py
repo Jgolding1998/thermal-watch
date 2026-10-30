@@ -9,7 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from .inputs import SnapshotError, apply_csv, parse_csv
+from .inputs import SnapshotError, SnapshotTooLarge, apply_csv, parse_csv
 
 
 STATIC = Path(__file__).parent / "static"
@@ -79,18 +79,20 @@ class Application:
         with self._lifecycle_lock:
             if self._closed:
                 return
-        parsed, invalid = None, False
+        parsed, invalid = None, None
         if self.csv_path:
             try:
                 parsed, _ = parse_csv(self.csv_path, self.monitor.rules)
+            except SnapshotTooLarge:
+                invalid = "The CSV is larger than the 1 MiB snapshot limit, so it was not read and sensors show a fault. Have the producer keep one current row per sensor, as the record and sensor commands do."
             except (OSError, ValueError, UnicodeError):
-                invalid = True
+                invalid = "Input is missing or invalid. Check your CSV producer."
         with self._lifecycle_lock:
             if self._closed:
                 return
             if self.csv_path:
                 if invalid:
-                    self.input_error = "Input is missing or invalid. Check your CSV producer."
+                    self.input_error = invalid
                     for sensor in self.monitor.rules:
                         self.monitor.fault(sensor)
                 else:

@@ -11,6 +11,51 @@ from .monitor import Monitor, load_rules
 from .notify import Webhook
 from .server import Application, make_server
 
+# Fixed validation reasons raised by this package. Only an exact match is printed, so exception
+# text from libraries, paths and configured values never reach the terminal.
+SAFE_REASONS = frozenset({
+    "Sample output already exists; choose a new file",
+    "Sensor interval must be between 1 and 3600 seconds",
+    "Port must be between 1 and 65535",
+    "Webhooks are disabled in demo mode; select --csv live input",
+    "Set your own THERMAL_WEBHOOK_URL before enabling --webhook",
+    "Webhook requires a public HTTPS endpoint on port 443 without credentials or a fragment",
+    "Webhook DNS must resolve exclusively to public addresses within its deadline",
+    "Configuration is too large",
+    "Configuration contains duplicate keys",
+    "Configuration must use finite numbers",
+    "Configuration must be valid UTF-8 JSON",
+    "Configuration must contain a sensors array",
+    "Configure 1 to 16 sensors",
+    "Each sensor must contain the required rule fields and no unknown fields",
+    "Sensor IDs must be unique",
+    "Sensor IDs must use 1 to 48 letters, numbers, underscores or hyphens",
+    "Sensor labels must use 1 to 80 printable characters",
+    "Thresholds and timing must be finite numbers",
+    "Thresholds must be ordered and between -100 and 350 Celsius",
+    "Hysteresis must be less than half the threshold range",
+    "Invalid timing configuration",
+    "CSV snapshot is larger than the 1 MiB limit and was left unchanged; keep one current row per sensor, as the record and sensor commands do",
+    "CSV header must be sensor,temperature_c,observed_at",
+    "CSV structure is invalid",
+    "Another producer holds the CSV lock",
+    "Value must be finite and between -100 and 350 Celsius",
+    "Invalid sensor ID",
+    "Existing snapshot contains a malformed row",
+    "Snapshot contains too many sensors",
+})
+
+
+FAILURE_LABELS = {"record": "Cannot record reading", "sample": "Cannot create sample", "sensor": "Cannot start sensor producer"}
+
+
+def failure_text(error, command="serve"):
+    label = FAILURE_LABELS.get(command, "Cannot start")
+    reason = str(error) if isinstance(error, ValueError) else ""
+    if reason in SAFE_REASONS:
+        return f"{label}: {reason}."
+    return f"{label}: {type(error).__name__}. Check your command and local configuration."
+
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="A local temperature dashboard. No account or API key required.")
@@ -90,7 +135,7 @@ def main(argv=None):
     except KeyboardInterrupt:
         return 0
     except (ValueError, TypeError, OSError) as error:
-        print(f"Cannot start: {type(error).__name__}. Check your command and local configuration.", file=sys.stderr)
+        print(failure_text(error, args.command), file=sys.stderr)
         return 2
 
 
