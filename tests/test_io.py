@@ -18,9 +18,23 @@ from thermal_watch.notify import Webhook
 from thermal_watch.server import Application
 
 
-def produce_snapshot(path, sensor, count):
+LOCK_BUSY = "Another producer holds the CSV lock"
+
+
+def produce_snapshot(path, sensor, count, start=None, budget=60):
+    # The lock polls and fails closed after 2 s, so a tight-looping peer can starve this writer.
+    # That bounded busy reply is expected here; retry only that, within a test-level budget.
+    if start is not None:
+        start.wait(timeout=30)
+    deadline = time.monotonic() + budget
     for index in range(count):
-        append_reading(Path(path), sensor, -18 + index / 1000, 1000 + index)
+        while True:
+            try:
+                append_reading(Path(path), sensor, -18 + index / 1000, 1000 + index)
+                break
+            except ValueError as error:
+                if str(error) != LOCK_BUSY or time.monotonic() >= deadline:
+                    raise
 
 
 class InputTests(unittest.TestCase):
@@ -74,12 +88,20 @@ class InputTests(unittest.TestCase):
 
     def test_multiple_processes_preserve_each_sensor_snapshot(self):
         context = multiprocessing.get_context("spawn")
-        workers = [context.Process(target=produce_snapshot, args=(str(self.path), sensor, 50)) for sensor in ["freezer", "cooker"]]
-        for worker in workers:
-            worker.start()
-        for worker in workers:
-            worker.join(timeout=15)
-            self.assertEqual(worker.exitcode, 0)
+        start = context.Barrier(2)  # both writers begin together, so the lock is really contended
+        workers = [context.Process(target=produce_snapshot, args=(str(self.path), sensor, 50, start)) for sensor in ["freezer", "cooker"]]
+        try:
+            for worker in workers:
+                worker.start()
+            for worker in workers:
+                worker.join(timeout=90)
+        finally:
+            # Join every started child before asserting, so none still holds the lock file during cleanup.
+            for worker in workers:
+                if worker.pid is not None and worker.is_alive():
+                    worker.terminate()
+                    worker.join(timeout=10)
+        self.assertEqual([worker.exitcode for worker in workers], [0, 0])
         with self.path.open(newline="") as handle:
             rows = list(csv.DictReader(handle))
         self.assertEqual(len(rows), 2)
