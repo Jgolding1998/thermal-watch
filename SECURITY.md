@@ -28,6 +28,8 @@ Clock rollback is shown as an input fault until a current reading arrives. A phy
 
 Database files, real readings, local config, screenshots of private installations, and environment files must stay out of Git. The included screenshots use simulated data only. Before publishing a fork, inspect both current files and Git history with a secret scanner and check commit-author privacy settings.
 
+Responses are flushed before a shared half-close and bounded raw-input discard: at most 16 KiB within one 100-millisecond deadline. Discarded bytes are never parsed or acted on. This preserves early errors for small delayed bodies; larger or later sends can still reset a connection. Admission limits include this cleanup time, and request authorization and size limits are unchanged.
+
 ## Reporting a vulnerability
 
 Use [Security > Report a vulnerability](https://github.com/Jgolding1998/thermal-watch/security/advisories/new) to send a private report. Do not submit vulnerability details through the public feedback form.

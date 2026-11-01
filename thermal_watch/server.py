@@ -29,6 +29,31 @@ BUSY_RESPONSE = (b"HTTP/1.0 503 Service Unavailable\r\nContent-Type: text/plain;
                  + b"Connection: close\r\n\r\nServer busy")
 
 
+def _linger_discard(request):
+    """Half-close, then discard at most 16 KiB within one 100ms deadline.
+
+    Small delayed bodies must not reset an unread early response. Discarded
+    bytes are never parsed or acted on; larger or later sends can still reset.
+    """
+    try:
+        request.shutdown(socket.SHUT_WR)
+    except OSError:
+        return
+    remaining, deadline = 16 * 1024, time.monotonic() + .1
+    while remaining:
+        left = deadline - time.monotonic()
+        if left <= 0:
+            return
+        try:
+            request.settimeout(left)
+            block = request.recv(min(4096, remaining))
+        except OSError:
+            return
+        if not block:
+            return
+        remaining -= len(block)
+
+
 class SocketDeadline:
     """Shuts a connection down at a fixed time unless cancelled. It never fires after cancel() returns."""
 
@@ -276,22 +301,21 @@ def make_server(app, port=8766):
             connection.settimeout(3)
             return connection, address
 
+        def shutdown_request(self, request):
+            # Handler.finish() has flushed any response before shared socket cleanup.
+            try:
+                _linger_discard(request)
+            finally:
+                super().shutdown_request(request)
+
         def process_request(self, request, address):
             if not self.connections.acquire(blocking=False):
                 try:
                     request.sendall(BUSY_RESPONSE)
-                    request.shutdown(socket.SHUT_WR)
-                    request.settimeout(0.05)
-                    remaining = 16384
-                    deadline = time.monotonic() + 0.1
-                    while remaining > 0 and time.monotonic() < deadline:
-                        data = request.recv(min(4096, remaining))
-                        if not data:
-                            break
-                        remaining -= len(data)
                 except OSError:
                     pass
-                self.shutdown_request(request)
+                finally:
+                    self.shutdown_request(request)
                 return
             try:
                 super().process_request(request, address)
