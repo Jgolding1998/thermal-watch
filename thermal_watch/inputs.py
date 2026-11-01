@@ -74,9 +74,8 @@ def read_csv(path: Path, monitor):
 @contextmanager
 def _writer_lock(path, timeout=2):
     handle = path.with_name(path.name + ".lock").open("a+b")
-    if handle.seek(0, os.SEEK_END) == 0:
-        handle.write(b"\0")
-        handle.flush()
+    # Byte-range locks can extend past EOF; flock also supports empty files.
+    # Writing a marker before locking can collide with a peer's locked byte.
     acquired = False
     deadline = time.monotonic() + timeout
     try:
