@@ -123,6 +123,30 @@ class ResponseCloseTests(unittest.TestCase):
 
 
 class CleanupBoundsTests(unittest.TestCase):
+    def test_large_monotonic_clock_keeps_every_socket_timeout_within_one_tenth(self):
+        request = MagicMock()
+        request.recv.side_effect = lambda size: b"x" * size
+        # This is the actual IEEE 754 rounding direction at the reproduced uptime.
+        self.assertGreater((100000.0 + .1) - 100000.0, .1)
+        with patch.object(transport.time, "monotonic", return_value=100000.0):
+            transport._linger_discard(request)
+        self.assertEqual([call.args[0] for call in request.recv.call_args_list], [4096] * 4)
+        self.assertEqual(request.settimeout.call_count, 4)
+        self.assertTrue(all(0 < call.args[0] <= .1 for call in request.settimeout.call_args_list))
+        request.shutdown.assert_called_once_with(socket.SHUT_WR)
+
+    def test_large_clock_uses_the_remaining_deadline_instead_of_resetting_each_read(self):
+        request = MagicMock()
+        request.recv.return_value = b"x"
+        start = 100000.0
+        with patch.object(transport.time, "monotonic", side_effect=[start, start, start + .06, start + .101]):
+            transport._linger_discard(request)
+        self.assertEqual(request.recv.call_count, 2)
+        timeouts = [call.args[0] for call in request.settimeout.call_args_list]
+        self.assertEqual(timeouts[0], .1)
+        self.assertEqual(timeouts[1], (start + .1) - (start + .06))
+        self.assertTrue(0 < timeouts[1] < .05)
+
     def test_discards_only_sixteen_kib_without_eof(self):
         request = MagicMock()
         request.recv.side_effect = lambda size: b"x" * size
