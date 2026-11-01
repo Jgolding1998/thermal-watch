@@ -8,10 +8,21 @@ const fs = require("node:fs");
   try {
     const page = await browser.newPage({viewport:{width:1440,height:1100}, deviceScaleFactor:1});
     const errors = [];
+    const external = [];
+    const target = new URL(process.env.THERMAL_TEST_URL || "http://127.0.0.1:8766");
+    assert.equal(target.protocol, "http:");
+    assert.equal(target.hostname, "127.0.0.1");
+    await page.route("**/*", route => {
+      if (new URL(route.request().url()).origin !== target.origin) {
+        external.push("unexpected origin");
+        return route.abort();
+      }
+      return route.continue();
+    });
     const screenshots = process.env.THERMAL_SCREENSHOT_DIR || path.join(__dirname,"../docs");
     fs.mkdirSync(screenshots, {recursive:true});
     page.on("pageerror", error => errors.push(error.message));
-    await page.goto(process.env.THERMAL_TEST_URL || "http://127.0.0.1:8766");
+    await page.goto(target.href);
     await page.waitForFunction(() => document.querySelectorAll(".sensor-card").length === 2);
     assert.equal(await page.locator("#mode-badge").textContent(), "DEMO MODE");
     assert.equal(await page.locator("#connection-error").isVisible(), false);
@@ -52,6 +63,7 @@ const fs = require("node:fs");
     await page.waitForFunction(() => !document.querySelector("#connection-error").hidden, {timeout:7000});
     assert.equal(await page.locator("#connection").textContent(), "Connection lost");
     assert.deepEqual(errors, []);
+    assert.deepEqual(external, []);
     console.log("Browser checks passed: desktop/mobile layout, units, demo label, safe text, snapshot replacement, empty charts, connection loss, no script errors.");
   } finally {
     await browser.close();
